@@ -21,7 +21,7 @@
 ; THE SOFTWARE.
 ; ============================================================================
 
-; This code last touched: 25121511
+; This code last touched: 25121512
 
 ; ============================================================================
 ; The current understanding of the legal status of this code is as follows:
@@ -90,12 +90,15 @@ usrvec     =        $0A
 index      =        $5E
 strend     =        $6D
 fretop     =        $6F
+curlin     =        $75
 forpnt     =        $85
 temp1      =        $93
 highds     =        $94
 hightr     =        $96
 lowtr      =        $9B
 fac        =        $9D
+txtptr     =        $B8
+errflg     =        $D8
 
 stack      =        $0100
 
@@ -252,7 +255,7 @@ tokadr:   .word     end-1
           .word     home-1
           .word     rot-1
           .word     scale-1
-          .word     underr-1
+          .word     userr-1
           .word     trace-1
           .word     notrace-1
           .word     normal-1
@@ -265,8 +268,8 @@ tokadr:   .word     end-1
           .word     lomem-1
           .word     onerr-1
           .word     resume-1
-          .word     underr-1
-          .word     underr-1
+          .word     userr-1
+          .word     userr-1
           .word     speed-1
           .word     let-1
           .word     goto-1
@@ -280,8 +283,8 @@ tokadr:   .word     end-1
           .word     stop-1
           .word     ongoto-1
           .word     wait-1
-          .word     underr-1
-          .word     underr-1
+          .word     userr-1
+          .word     userr-1
           .word     def-1
           .word     poke-1
           .word     print-1
@@ -316,8 +319,8 @@ tokadr:   .word     end-1
           .word     rightstr
           .word     midstr
 
-LD0B2:    .byte     $79
-LD0B3:    .word     faddt-1
+mathtbl:  .byte     $79
+          .word     faddt-1
           .byte     $79
           .word     fsubt-1
           .byte     $7b
@@ -462,7 +465,7 @@ e_rg       =        *-errtab
           asct      "RETURN WITHOUT GOSUB"
 e_od       =        *-errtab
           asct      "OUT OF DATA"
-e_iq       =        *-errtab
+e_fc       =        *-errtab
           asct      "ILLEGAL QUANTITY"
 e_ov       =        *-errtab
           asct      "OVERFLOW"
@@ -637,48 +640,52 @@ reason:   cpy       fretop+1
 @4:       rts
 
 omerr:    ldx       #e_om
-error:    ldy       $d8
-          beq       @LD419
-          jmp       handlerr
-
-@LD419:   jsr       crdo
-          jsr       outqst
-@LD41F:   lda       errtab, x
-          pha
+error:    ldy       errflg              ; Check for ONERR
+          beq       @1                  ; No; continue
+          jmp       handlerr            ; Yes; override
+@1:       jsr       crdo                ; Output CRLF
+          jsr       outqst              ; Print question mark
+@2:       lda       errtab, x           ; Print error message
+          pha                           ; Save character
           jsr       outdo
           inx
-          pla
-          bpl       @LD41F
-          jsr       stkini
-          lda       #$50
-          ldy       #$d3
-errfin:   jsr       strout
-          ldy       $76
-          iny
-          beq       ready
-          jsr       fpinprt
-ready:    jsr       crdo
-          ldx       #$dd
-          stz       $d8
-          jsr       inlin2
-          stx       z:L00B7+1
-          sty       z:L00B7+2
-          jsr       chrget
-          tax
-          beq       ready
-          ldx       #$ff
-          stx       $76
-          bcc       numbered_line
-          jsr       parse_input_line
-          jmp       trace_
+          pla                           ; Retrieve character
+          bpl       @2                  ; High bit on, continue
+          jsr       stkini              ; Reset stack and flags
+          lda       #<m_err             ; Get pointer to " ERROR"
+          ldy       #>m_err
+errfin:   jsr       strout              ; Output (also used by BREAK)
+          ldy       curlin+1
+          iny                           ; Was number 64000?
+          beq       ready               ; Yes; don't print line number
+          jsr       inprt
 
-numbered_line:
-          ldx       $b0
+; ----------------------------------------------------------------------------
+; Warm restart point (vectored from $0000, $03D0, $E003)
+; ----------------------------------------------------------------------------
+
+ready:    jsr       crdo                ; Output CRLF
+          ldx       #']'+$80            ; Prompt character
+          stz       errflg              ; Clear ONERR flag
+          jsr       inlin2              ; Get line from user
+          stx       txtptr
+          sty       txtptr+1
+          jsr       chrget
+          tax                           ; Set Z based on A
+                                        ; (distinguish : and 0)
+          beq       ready               ; Blank line; go back to top
+          ldx       #$FF                ; Set DIRECT line number
+          stx       curlin+1
+          bcc       islin               ; Is a line number.
+          jsr       crunch              ; Tokenize
+          jmp       gone                ; Do it, maggot.
+
+islin:    ldx       $b0
           ldy       $af
           stx       $6a
           sty       $69
           jsr       linget
-          jsr       parse_input_line
+          jsr       crunch
           sty       $0f
           jsr       fndlin
           bcc       put_new_line
@@ -821,8 +828,8 @@ inchr:    jmp       LD533
           .byte     $ff
           .byte     $ff
 
-parse_input_line:
-          ldx       z:L00B7+1
+crunch:
+          ldx       txtptr
           ldy       #$04
           lda       $d6
           asl
@@ -910,8 +917,8 @@ parse:    inx
           sta       $01fb, y
           sta       $01fd, y
           dec
-          sta       z:L00B7+1
-          dec       z:L00B7+2
+          sta       txtptr
+          dec       txtptr+1
           rts
 
 @LD608:   jsr       LF3A5
@@ -1005,10 +1012,10 @@ LD696:    rts
 stxtpt:   clc
           lda       $67
           adc       #$ff
-          sta       z:L00B7+1
+          sta       txtptr
           lda       $68
           adc       #$ff
-          sta       z:L00B7+2
+          sta       txtptr+1
           rts
 
 list:     jsr       linget
@@ -1134,14 +1141,14 @@ for:      lda       #$80
           jsr       datan
           clc
           tya
-          adc       z:L00B7+1
+          adc       txtptr
           pha
-          lda       z:L00B7+2
+          lda       txtptr+1
           adc       #$00
           pha
-          lda       $76
+          lda       curlin+1
           pha
-          lda       $75
+          lda       curlin
           pha
           lda       #$c1
           jsr       synchr
@@ -1177,12 +1184,12 @@ newstt:   tsx
           txa
           sta       $f8
           jsr       iscntc
-          ldx       $76
-          lda       z:L00B7+1
+          ldx       curlin+1
+          lda       txtptr
           inx
           beq       @LD7E6
           sta       $79
-          lda       z:L00B7+2
+          lda       txtptr+1
           sta       $7a
 @LD7E6:   lda       (L00B7+1)
           bne       LD842
@@ -1193,16 +1200,16 @@ newstt:   tsx
           beq       goend
           iny
           lda       (L00B7+1), y
-          sta       $75
+          sta       curlin
           iny
           lda       (L00B7+1), y
-          sta       $76
+          sta       curlin+1
           tya
-          adc       z:L00B7+1
-          sta       z:L00B7+1
-          bcc       trace_
-          inc       z:L00B7+2
-trace_:   lda       $76
+          adc       txtptr
+          sta       txtptr
+          bcc       gone
+          inc       txtptr+1
+gone:   lda       curlin+1
           inc
           beq       @LD81D
           lda       $f2
@@ -1241,8 +1248,8 @@ execute_statement_1:
 @LD83F:   jmp       let
 
 LD842:    cmp       #$3a
-          beq       trace_
-LD846:    jmp       synerr
+          beq       gone
+LD846:    jmp       snerr
 
 restore:  sec
           lda       $67
@@ -1261,7 +1268,7 @@ iscntc:   lda       #$83
           nop
 control_c_typed:
           ldx       #$ff
-          ldy       $d8
+          ldy       errflg
           beq       @LD86C
           jmp       handlerr
 
@@ -1269,15 +1276,15 @@ control_c_typed:
 stop:     bcs       end2
 end:      clc
 end2:     bne       LD8AF
-          lda       $76
+          lda       curlin+1
           inc
           beq       @LD888
-          ldy       z:L00B7+1
+          ldy       txtptr
           sty       $79
-          ldy       z:L00B7+2
+          ldy       txtptr+1
           sty       $7a
-          lda       $75
-          ldy       $76
+          lda       curlin
+          ldy       curlin+1
           sta       $77
           sty       $78
 @LD888:   pla
@@ -1289,19 +1296,21 @@ LD88A:    lda       #$5d
 
 @LD893:   jmp       ready
 
-cont:     bne       LD8AF
-          ldx       #$d2
-          ldy       $7a
-          bne       @LD8A1
-          jmp       error
+cont:     bne       LD8AF               ; Make sure there is a terminator.
+          ldx       #e_cn
+          ldy       $7a                 ; A stored TXTPTR of 0 is set up by
+                                        ; STKINI and indicates there is
+                                        ; nothing to continue.
+          bne       @LD8A1              ; STOP, END, typing CRLF to INPUT, and
+          jmp       error               ; ^C setup OLDTXT.
 
 @LD8A1:   lda       $79
-          sta       z:L00B7+1
-          sty       z:L00B7+2
+          sta       txtptr
+          sty       txtptr+1
           lda       $77
           ldy       $78
-          sta       $75
-          sty       $76
+          sta       curlin
+          sty       curlin+1
 LD8AF:    rts
 
 LD8B0:    jsr       outqst
@@ -1346,8 +1355,8 @@ LD8E8:    bit       $14
           pla
           jmp       array
 
-LD8F4:    lda       $76
-          ldx       $75
+LD8F4:    lda       curlin+1
+          ldx       curlin
           jsr       linprt
           jmp       outspc
 
@@ -1365,7 +1374,7 @@ LD906:    lda       #$17
           nop
           nop
 run:      php
-          dec       $76
+          dec       curlin+1
           plp
           bne       @LD91B
           jmp       setptrs
@@ -1375,13 +1384,13 @@ run:      php
 
 gosub:    lda       #$03
           jsr       getstk
-          lda       z:L00B7+2
+          lda       txtptr+1
           pha
-          lda       z:L00B7+1
+          lda       txtptr
           pha
-          lda       $76
+          lda       curlin+1
           pha
-          lda       $75
+          lda       curlin
           pha
           lda       #$b0
           pha
@@ -1392,13 +1401,13 @@ go_to_line:
 
 goto:     jsr       linget
           jsr       remn
-          lda       $76
+          lda       curlin+1
           cmp       $51
           bcs       @LD955
           tya
           sec
-          adc       z:L00B7+1
-          ldx       z:L00B7+2
+          adc       txtptr
+          ldx       txtptr+1
           bcc       @LD959
           inx
           bcs       @LD959
@@ -1406,51 +1415,51 @@ goto:     jsr       linget
 @LD955:   lda       $67
           ldx       $68
 @LD959:   jsr       LD61E
-          bcc       underr
+          bcc       userr
 LD95E:    lda       lowtr
           sbc       #$01
-          sta       z:L00B7+1
+          sta       txtptr
           lda       lowtr+1
           sbc       #$00
-          sta       z:L00B7+2
+          sta       txtptr+1
 LD96A:    rts
 
-pop:      bne       LD96A
-          lda       #$ff
-          sta       forpnt
-          jsr       fndfor
+pop:      bne       LD96A               ; No terminator = blow him up
+          lda       #$FF
+          sta       forpnt+1            ; Make sure the variable's pointer
+                                        ; never gets matched.
+          jsr       fndfor              ; Go past all the FOR entries.
           txs
-          cmp       #$b0
+          cmp       #tk_gosub           ; RETURN without GOSUB?
           beq       return
-          ldx       #$16
+          ldx       #e_rg
           .byte     $2c
-underr:   ldx       #$5a
+userr:    ldx       #e_ul               ; No; Undefined Statement
           jmp       error
 
-synerr_2:
-          jmp       synerr
+snerr2:   jmp       snerr
 
 return:   pla
           pla
           cpy       #$62
           bne       pull3
-          sta       $75
+          sta       curlin
           pla
-          sta       $76
+          sta       curlin+1
           pla
-          sta       z:L00B7+1
+          sta       txtptr
           pla
-          sta       z:L00B7+2
+          sta       txtptr+1
 data:     jsr       datan
 addon:    tya
           clc
-          adc       z:L00B7+1
-          sta       z:L00B7+1
+          adc       txtptr
+          sta       txtptr
           bcc       LD9A2
-          inc       z:L00B7+2
+          inc       txtptr+1
 LD9A2:    rts
 
-datan:    ldx       #$3a
+datan:    ldx       #':'
           .byte     $2c
 remn:     ldx       #$00
           stx       $0d
@@ -1495,7 +1504,7 @@ ongoto:   jsr       getbyt
           cmp       #$b0
           beq       LD9F8
 LD9F4:    cmp       #$ab
-          bne       synerr_2
+          bne       snerr2
 LD9F8:    dec       $a1
           bne       @LDA00
           pla
@@ -1718,14 +1727,14 @@ inputerr:
 
 readerr:  lda       $7b
           ldy       $7c
-erlin:    sta       $75
-          sty       $76
-LDB83:    jmp       synerr
+erlin:    sta       curlin
+          sty       curlin+1
+LDB83:    jmp       snerr
 
           .byte     $ff
 
 resperr:  ldx       #$fe
-          lda       $d8
+          lda       errflg
           bpl       @LDB90
           jmp       handlerr
 
@@ -1734,8 +1743,8 @@ resperr:  ldx       #$fe
           jsr       strout
           lda       $79
           ldy       $7a
-          sta       z:L00B7+1
-          sty       z:L00B7+2
+          sta       txtptr
+          sty       txtptr+1
           rts
 
 get:      jsr       errdir
@@ -1789,14 +1798,14 @@ process_input_item:
           jsr       ptrget
           sta       forpnt
           sty       forpnt+1
-          lda       z:L00B7+1
-          ldy       z:L00B7+2
+          lda       txtptr
+          ldy       txtptr+1
           sta       $87
           sty       $88
           ldx       $7f
           ldy       $80
-          stx       z:L00B7+1
-          sty       z:L00B7+2
+          stx       txtptr
+          sty       txtptr+1
           jsr       L00B7
           bne       instart
           bit       $15
@@ -1811,15 +1820,15 @@ process_input_item:
 @LDC1F:   bmi       findata
           jsr       outqst
           jsr       nxin
-@LDC27:   stx       z:L00B7+1
-          sty       z:L00B7+2
+@LDC27:   stx       txtptr
+          sty       txtptr+1
 instart:  jsr       chrget
           bit       $11
           bpl       @LDC63
           bit       $15
           bvc       @LDC3F
           inx
-          stx       z:L00B7+1
+          stx       txtptr
           lda       #$00
           sta       $0d
           beq       @LDC4B
@@ -1832,8 +1841,8 @@ instart:  jsr       chrget
           lda       #$2c
 @LDC4B:   clc
 @LDC4C:   sta       $0e
-          lda       z:L00B7+1
-          ldy       z:L00B7+2
+          lda       txtptr
+          ldy       txtptr+1
           adc       #$00
           bcc       @LDC57
           iny
@@ -1857,14 +1866,14 @@ input_more:
           beq       @LDC7E
           jmp       inputerr
 
-@LDC7E:   lda       z:L00B7+1
-          ldy       z:L00B7+2
+@LDC7E:   lda       txtptr
+          ldy       txtptr+1
           sta       $7f
           sty       $80
           lda       $87
           ldy       $88
-          sta       z:L00B7+1
-          sty       z:L00B7+2
+          sta       txtptr
+          sty       txtptr+1
           jsr       L00B7
           beq       inpdone
           jsr       chkcom
@@ -1955,13 +1964,13 @@ LDD0F:    txs
           sbc       $0109, x
           beq       @LDD55
           lda       $010f, x
-          sta       $75
+          sta       curlin
           lda       $0110, x
-          sta       $76
+          sta       curlin+1
           lda       $0112, x
-          sta       z:L00B7+1
+          sta       txtptr
           lda       $0111, x
-          sta       z:L00B7+2
+          sta       txtptr+1
 @LDD52:   jmp       newstt
 
 @LDD55:   txa
@@ -1983,13 +1992,13 @@ chkval:   bit       $11
 @LDD73:   rts
 
 @LDD74:   bcs       @LDD73
-@LDD76:   ldx       #$a3
+@LDD76:   ldx       #e_tm
 jerror:   jmp       error
 
-frmevl:   ldx       z:L00B7+1
+frmevl:   ldx       txtptr
           bne       @LDD81
-          dec       z:L00B7+2
-@LDD81:   dec       z:L00B7+1
+          dec       txtptr+1
+@LDD81:   dec       txtptr
           ldx       #$00
           .byte     $24
 LDD86:    pha
@@ -2032,7 +2041,7 @@ LDD95:    jsr       L00B7
           tay
 frm_precedence_test:
           pla
-          cmp       LD0B2, y
+          cmp       mathtbl, y
           bcs       frm_perform_1
           jsr       chknum
 nxop:     pha
@@ -2048,32 +2057,32 @@ frm_relational:
           lsr       $11
           txa
           rol
-          ldx       z:L00B7+1
+          ldx       txtptr
           bne       @LDDEE
-          dec       z:L00B7+2
-@LDDEE:   dec       z:L00B7+1
+          dec       txtptr+1
+@LDDEE:   dec       txtptr
           ldy       #$1b
           sta       $89
           bne       frm_precedence_test
 
-prefnc:   cmp       LD0B2, y
+prefnc:   cmp       mathtbl, y
           bcs       frm_perform_2
           bcc       nxop
 
 frm_recurse:
-          lda       LD0B3+1, y
+          lda       mathtbl+2, y
           pha
-          lda       LD0B3, y
+          lda       mathtbl+1, y
           pha
           jsr       frm_stack_1
           lda       $89
           jmp       LDD86
 
-sntxerr:  jmp       synerr
+sntxerr:  jmp       snerr
 
 frm_stack_1:
           lda       $a2
-          ldx       LD0B2, y
+          ldx       mathtbl, y
 frm_stack_2:
           nop
           ply
@@ -2144,8 +2153,8 @@ frm_element:
           beq       @LDE64
           cmp       #$22
           bne       do_not
-strtxt:   lda       z:L00B7+1
-          ldy       z:L00B7+2
+strtxt:   lda       txtptr
+          ldy       txtptr+1
           adc       #$00
           bcc       @LDE8A
           iny
@@ -2183,10 +2192,10 @@ chkopn:   lda       #$28
 chkcom:   lda       #$2c
 synchr:   ldy       #$00
           cmp       (L00B7+1), y
-          bne       synerr
+          bne       snerr
           jmp       chrget
 
-synerr:   ldx       #$10
+snerr:    ldx       #e_sn
           jmp       error
 
 min:      ldy       #$15
@@ -2359,7 +2368,7 @@ LDFEA:    sta       $81
           jsr       L00B7
           jsr       isletc
           bcs       namok
-badnam:   jmp       synerr
+badnam:   jmp       snerr
 
 namok:    ldx       #$00
           stx       $11
@@ -2605,9 +2614,9 @@ array:    ldy       $14
           lda       (lowtr), y
           adc       lowtr+1
           bcc       @LE16D
-suberr:   ldx       #$6b
+suberr:   ldx       #e_bs
           .byte     $2c
-iqerr:    ldx       #$35
+iqerr:    ldx       #e_fc
 jer:      jmp       error
 
 use_old_array:
@@ -2825,12 +2834,12 @@ pos:      ldy       $24
 sngflt:   lda       #$80
           asl
           beq       givayf
-errdir:   ldx       $76
+errdir:   ldx       curlin+1
           inx
           bne       LE2AC
           ldx       #$95
           .byte     $2c
-undfnc:   ldx       #$e0
+undfnc:   ldx       #e_uf
           jmp       error
 
 def:      jsr       fnc
@@ -2848,9 +2857,9 @@ def:      jsr       fnc
           pha
           lda       $83
           pha
-          lda       z:L00B7+2
+          lda       txtptr+1
           pha
-          lda       z:L00B7+1
+          lda       txtptr
           pha
           jsr       data
           jmp       fncdata
@@ -2890,15 +2899,15 @@ funct:    jsr       fnc
           bpl       @LE378
           ldy       $84
           jsr       store_fac_at_yx_rounded
-          lda       z:L00B7+2
+          lda       txtptr+1
           pha
-          lda       z:L00B7+1
+          lda       txtptr
           pha
           lda       ($8a), y
-          sta       z:L00B7+1
+          sta       txtptr
           iny
           lda       ($8a), y
-          sta       z:L00B7+2
+          sta       txtptr+1
           lda       $84
           pha
           lda       $83
@@ -2910,12 +2919,12 @@ funct:    jsr       fnc
           sta       $8b
           jsr       L00B7
           beq       @LE3A9
-          jmp       synerr
+          jmp       snerr
 
 @LE3A9:   pla
-          sta       z:L00B7+1
+          sta       txtptr
           pla
-          sta       z:L00B7+2
+          sta       txtptr+1
 fncdata:  ldy       #$00
           pla
           sta       ($8a), y
@@ -2991,7 +3000,7 @@ LE3ED:    sta       $ab
 putnew:   ldx       $52
           cpx       #$5e
           bne       putemp
-          ldx       #$bf
+          ldx       #e_fc
 jerr:     jmp       error
 
 putemp:   lda       fac
@@ -3210,7 +3219,7 @@ cat:      lda       $a1
           clc
           adc       ($a0), y
           bcc       @LE5B7
-          ldx       #$b0
+          ldx       #e_ls
           jmp       error
 
 @LE5B7:   jsr       strini
@@ -3417,17 +3426,17 @@ val:      jsr       getstr
           bne       @LE70F
           jmp       zero_fac
 
-@LE70F:   ldx       z:L00B7+1
-          ldy       z:L00B7+2
+@LE70F:   ldx       txtptr
+          ldy       txtptr+1
           stx       $ad
           sty       $ae
           ldx       index
-          stx       z:L00B7+1
+          stx       txtptr
           clc
           adc       index
           sta       $60
           ldx       index+1
-          stx       z:L00B7+2
+          stx       txtptr+1
           bcc       @LE727
           inx
 @LE727:   stx       $61
@@ -3443,8 +3452,8 @@ val:      jsr       getstr
           sta       ($60), y
 point:    ldx       $ad
           ldy       $ae
-          stx       z:L00B7+1
-          sty       z:L00B7+2
+          stx       txtptr
+          sty       txtptr+1
           rts
 
 gtnum:    jsr       frmnum
@@ -3667,7 +3676,7 @@ increment_fac_mantissa:
 LE8D4:    rts
 
 overflow:
-          ldx       #$45
+          ldx       #e_ov
           jmp       error
 
 shift_right_1:
@@ -3987,7 +3996,7 @@ fdivt:    beq       @LEAE1
           plp
           jmp       copy_result_into_fac
 
-@LEAE1:   ldx       #$85
+@LEAE1:   ldx       #e_dz
           jmp       error
 
 copy_result_into_fac:
@@ -4324,11 +4333,11 @@ getexp:   lda       $9a
           .byte     $28
           .byte     $00
 
-fpinprt:  lda       #$58
+inprt:  lda       #$58
           ldy       #$d3
           jsr       go_strout
-          lda       $76
-          ldx       $75
+          lda       curlin+1
+          ldx       curlin
 linprt:   sta       fac+1
           stx       $9f
           ldx       #$90
@@ -4924,11 +4933,12 @@ atn:      lda       $a2
           .byte     $00
           .byte     $00
 
+orgchget:
           .org      $00b1
-chrget:   inc       z:L00B7+1
+chrget:   inc       txtptr
           bne       L00B7
-          inc       z:L00B7+2
-L00B7:    lda       LEA60
+          inc       txtptr+1
+L00B7:    lda       LEA60               ; TXTPTR points here
           cmp       #$3a
           bcs       @L00C8
           cmp       #$20
@@ -4945,11 +4955,11 @@ L00B7:    lda       LEA60
           .byte     $52
 L00CD:    .byte     $58
 
-          .org      $f128
+          .org      orgchget+(*-chrget)
 cold_start:
           ldx       #$ff
           stx       $32
-          stx       $76
+          stx       curlin+1
           ldx       #$fb
           txs
           ldx       #$00
@@ -5200,10 +5210,10 @@ onerr:    cmp       #$ab
           sta       $f6
           stx       $f7
           lda       #$80
-          sta       $d8
+          sta       errflg
           jmp       rem
 
-LF2E4:    jmp       synerr
+LF2E4:    jmp       snerr
 
           .byte     $ff
           .byte     $ff
@@ -5213,7 +5223,7 @@ handlerr:
           ldx       #$01
 @LF2ED:   lda       $79, x
           sta       $dc, x
-          lda       $75, x
+          lda       curlin, x
           sta       $da, x
           lda       $f6, x
           sta       $50, x
@@ -5234,7 +5244,7 @@ resume:   ldx       #$01
 @LF31A:   lda       $dc, x
           sta       L00B7+1, x
           lda       $da, x
-          sta       $75, x
+          sta       curlin, x
           dex
           bpl       @LF31A
           nop
