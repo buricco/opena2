@@ -21,7 +21,7 @@
 ; THE SOFTWARE.
 ; ============================================================================
 
-; This code last touched: 25121512
+; This code last touched: 25121515
 
 ; ============================================================================
 ; The current understanding of the legal status of this code is as follows:
@@ -88,6 +88,8 @@
 usrvec     =        $0A
 
 count      =        $0F
+dores      =        $13
+inpflg     =        $15
 cqprmp     =        $33
 linnum     =        $50
 index      =        $5E
@@ -106,6 +108,7 @@ lowtr      =        $9B
 fac        =        $9D
 prgend     =        $AF
 txtptr     =        $B8
+protect    =        $D6
 errflg     =        $D8
 
 stack      =        $0100
@@ -815,10 +818,12 @@ inlin:    ldx       #$80
 inlin2:   stx       cqprmp
           jmp       cqinln
 
-LD533:    jsr       getch
-          asl
-          lsr
-          rts
+          nop
+          nop
+          nop
+          nop
+          nop
+          nop
 
           jmp       LD8BF
 
@@ -839,55 +844,56 @@ LD547:    lda       #$d0
           .byte     $ff
           .byte     $ff
 
-inchr:    jmp       LD533
+inchr:    jsr       getch
+          and       #$7F
+          rts
 
-          .byte     $ff
-          .byte     $ff
-          .byte     $ff
+; ============================================================================
+; Trying to clean out 65C02isms here.  This code is a bit grungy.
+; ============================================================================
 
 crunch:   ldx       txtptr
+          dex
           ldy       #$04
-          lda       $d6
-          asl
-          bcc       parse
-          nop
-          nop
-          nop
-          nop
+          sty       dores
+          bit       protect
+          bpl       parse
+          pla
+          pla
           jsr       runc
-          jmp       LD6EF
+          jmp       newstt
 
 parse:    inx
-          lda       $01ff, x
+          lda       inpbuf, x
           bne       @LD575
           jmp       @LD5FB
 
-@LD575:   cmp       #$20
+@LD575:   cmp       #' '
           beq       parse
-          cmp       #$3f
+          cmp       #'?'
           bne       @LD581
-          lda       #$ba
-          bra       @LD5E0
+          lda       #tk_print
+          bne       @LD5E0              ; ALWAYS
 
-@LD581:   cmp       #$30
+@LD581:   cmp       #'0'
           bcc       @LD589
-          cmp       #$3a
+          cmp       #'9'+1
           bcc       @LD5E0
 @LD589:   jsr       LD547
           lda       #$80
-          sta       $13
-          stx       $15
-          bra       @LD5B0
+          sta       dores
+          stx       inpflg
+          bne       @LD5B0              ; ALWAYS
 
 @LD594:   inc       fac
           bne       @LD59A
           inc       fac+1
 @LD59A:   lda       (fac)
           bpl       @LD594
-          ldx       $15
-          inc       $13
-          lda       $13
-          cmp       #$eb
+          ldx       inpflg
+          inc       dores
+          lda       dores
+          cmp       #tk_mid+1
           beq       @LD5DA
           dex
 @LD5A9:   inc       fac
@@ -902,16 +908,16 @@ parse:    inx
           beq       @LD5A9
           and       #$7f
           bne       @LD59A
-          lda       $13
+          lda       dores
           cmp       #$c5
           bne       @LD5E0
           lda       inpbuf, x
           jsr       LF3CB
-          cmp       #$4f
+          cmp       #'O'
           beq       @LD59A
-          cmp       #$4e
+          cmp       #'N'
           beq       @LD59A
-          lda       $13
+          lda       dores
           bra       @LD5E0
 
 @LD5DA:   lda       $01ff, x
@@ -984,7 +990,7 @@ LD648:    rts
 new:      bne       LD648
 scrtch:   lda       #$00
           tay
-          sta       $d6
+          sta       protect
           sta       (txttab), y
           iny
           sta       (txttab), y
@@ -996,7 +1002,7 @@ scrtch:   lda       #$00
           adc       #$00
           sta       prgend+1
           sta       vartab+1
-runc:  jsr       stxtpt
+runc:     jsr       stxtpt
           lda       #$00
 clear:    bne       LD696
 clearc:   lda       memsiz
@@ -1284,7 +1290,7 @@ LD857:    rts
 iscntc:   lda       #$83
           eor       $c000
           bne       LD857
-          jsr       LD533
+          jsr       inchr
           nop
 control_c_typed:
           ldx       #$ff
@@ -1457,7 +1463,7 @@ pop:      bne       LD96A               ; No terminator = blow him up
           cmp       #tk_gosub           ; RETURN without GOSUB?
           beq       return
           ldx       #e_rg
-          .byte     $2c
+          .byte     $2C
 userr:    ldx       #e_ul               ; No; Undefined Statement
           jmp       error
 
@@ -1489,7 +1495,7 @@ LD9A2:    rts
 ; ----------------------------------------------------------------------------
 
 datan:    ldx       #':'
-          .byte     $2c
+          .byte     $2C
 remn:     ldx       #$00
           stx       $0d
           ldy       #$00
@@ -1736,7 +1742,7 @@ strprt:   jsr       frefac
           jmp       @LDB44
 
 outspc:   lda       #' '
-          .byte     $2c
+          .byte     $2C
 outqst:   lda       #'?'
 outdo:    bit       #$60
           beq       @LDB68
@@ -1751,7 +1757,7 @@ outdo:    bit       #$60
           .byte     $ea
 
 inputerr:
-          lda       $15
+          lda       inpflg
           beq       resperr
           bmi       readerr
           ldy       #$ff
@@ -1821,7 +1827,7 @@ read:     ldy       $7e
 input_flag_zero:
           lda       #$00
 process_input_list:
-          sta       $15
+          sta       inpflg
           stx       $7f
           sty       $80
 process_input_item:
@@ -1838,7 +1844,7 @@ process_input_item:
           sty       txtptr+1
           jsr       L00B7
           bne       instart
-          bit       $15
+          bit       inpflg
           bvc       @LDC1F
           jsr       getch
           ldx       #$ff
@@ -1855,7 +1861,7 @@ process_input_item:
 instart:  jsr       chrget
           bit       $11
           bpl       @LDC63
-          bit       $15
+          bit       inpflg
           bvc       @LDC3F
           inx
           stx       txtptr
@@ -1909,7 +1915,7 @@ input_more:
           jsr       chkcom
           jmp       process_input_item
 
-inpfin:   ldy       $15
+inpfin:   ldy       inpflg
           jmp       LD8FE
 
           .byte     $ea
@@ -1939,7 +1945,7 @@ findata:  jsr       datan
 
 inpdone:  lda       $7f
           ldy       $80
-          ldx       $15
+          ldx       inpflg
           bpl       @LDCD1
           jmp       setda
 
@@ -2216,9 +2222,9 @@ sgn_:     cmp       #$d2
 parchk:   jsr       chkopn
           jsr       frmevl
 chkcls:   lda       #$29
-          .byte     $2c
+          .byte     $2C
 chkopn:   lda       #$28
-          .byte     $2c
+          .byte     $2C
 chkcom:   lda       #$2c
 synchr:   ldy       #$00
           cmp       (txtptr), y
@@ -2645,7 +2651,7 @@ array:    ldy       $14
           adc       lowtr+1
           bcc       @LE16D
 suberr:   ldx       #e_bs
-          .byte     $2c
+          .byte     $2C
 iqerr:    ldx       #e_fc
 jer:      jmp       error
 
@@ -2868,7 +2874,7 @@ errdir:   ldx       curlin+1
           inx
           bne       LE2AC
           ldx       #$95
-          .byte     $2c
+          .byte     $2C
 undfnc:   ldx       #e_uf
           jmp       error
 
@@ -3051,7 +3057,7 @@ putemp:   lda       fac
           stx       $52
           rts
 
-getspa:   lsr       $13
+getspa:   lsr       dores
 @LE454:   pha
           eor       #$ff
           sec
@@ -3073,11 +3079,11 @@ getspa:   lsr       $13
           rts
 
 @LE474:   ldx       e_om
-          lda       $13
+          lda       dores
           bmi       jerr
           jsr       garba2
           lda       #$80
-          sta       $13
+          sta       dores
           pla
           bne       @LE454
 garba2:   ldx       memsiz
@@ -3908,7 +3914,7 @@ LEA10:    beq       zero
           bcc       @LEA1B
           bmi       jov
           clc
-          .byte     $2c
+          .byte     $2C
 @LEA1B:   bpl       zero
           adc       #$80
           sta       fac
@@ -4065,7 +4071,7 @@ load_fac_from_ya:
 
 store_fac_in_temp2_rounded:
           ldx       #$98
-          .byte     $2c
+          .byte     $2C
 store_fac_in_temp1_rounded:
           ldx       #$93
           ldy       #$00
@@ -5864,7 +5870,7 @@ LF72D:    jmp       iqerr
 LF734:    jsr       LF7BF
           sta       $e5
           jsr       L00B7
-          cmp       #$c5
+          cmp       #tk_at
           bne       @LF74C
           jsr       chrget
           jsr       hfns
@@ -5912,15 +5918,16 @@ LF798:    jsr       frmnum
           jmp       getadr
 
 LF79E:    ldx       #$19
-          .byte     $2c
+          .byte     $2C
 LF7A1:    ldx       #$08
-          bit       $18a2
-          .byte     $2c
+          .byte     $2C
+LF7A4:    ldx       #$18
+          .byte     $2C
 LF7A7:    ldx       #$28
-          .byte     $2c
+          .byte     $2C
 LF7AA:    ldx       #$30
-          .byte     $2c
-LF7AD:    ldx       #$c0
+          .byte     $2C
+LF7AD:    ldx       #$C0
           phx
           jsr       getbyt
           pla
