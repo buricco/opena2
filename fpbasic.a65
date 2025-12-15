@@ -87,7 +87,11 @@
 
 usrvec     =        $0A
 
+charac     =        $0D
+endchr     =        $0E
 count      =        $0F
+valtyp     =        $11
+intflg     =        $12
 dores      =        $13
 inpflg     =        $15
 cqprmp     =        $33
@@ -106,6 +110,8 @@ highds     =        $94
 hightr     =        $96
 lowtr      =        $9B
 fac        =        $9D
+facmo      =        $A0
+faclo      =        $A1
 prgend     =        $AF
 txtptr     =        $B8
 protect    =        $D6
@@ -1044,7 +1050,7 @@ stxtpt:   clc
 
 list:     jsr       linget
           jsr       fndlin
-          jsr       L00B7
+          jsr       chrgot
           cmp       #','
           beq       @LD6B6
           cmp       #tk_sub
@@ -1195,7 +1201,7 @@ for:      lda       #$80
 step:     lda       #$13
           ldy       #$e9
           jsr       load_fac_from_ya
-          jsr       L00B7
+          jsr       chrgot
           cmp       #tk_step
           bne       @LD7C3
           jsr       chrget
@@ -1253,14 +1259,14 @@ gone:     lda       curlin+1
           nop
           nop
 @LD81D:   jsr       chrget
-          jsr       execute_statement
+          jsr       gone3
           jmp       newstt
 
 goend:    bra       LD88A
 
-execute_statement:
+gone3:
           beq       LD857
-execute_statement_1:
+gone2:
           sbc       #$80
           bcc       @LD83F
           cmp       #$40
@@ -1427,7 +1433,7 @@ gosub:    lda       #$03
           lda       #$b0
           pha
 go_to_line:
-          jsr       L00B7
+          jsr       chrgot
           jsr       goto
           jmp       newstt
 
@@ -1499,19 +1505,19 @@ LD9A2:    rts
 datan:    ldx       #':'
           .byte     $2C
 remn:     ldx       #$00
-          stx       $0d
+          stx       charac
           ldy       #$00
-          sty       $0e
-@LD9AE:   lda       $0e
-          ldx       $0d
-          sta       $0d
-          stx       $0e
+          sty       endchr
+@LD9AE:   lda       endchr
+          ldx       charac
+          sta       charac
+          stx       endchr
 @LD9B6:   lda       (txtptr), y
           beq       LD9A2
-          cmp       $0e
+          cmp       endchr
           beq       LD9A2
           iny
-          cmp       #$22
+          cmp       #'"'
           bne       @LD9B6
           beq       @LD9AE
 
@@ -1521,20 +1527,20 @@ pull3:    plx
           rts
 
 if:       jsr       frmevl
-          jsr       L00B7
-          cmp       #$ab
+          jsr       chrgot
+          cmp       #tk_goto
           beq       @LD9D8
-          lda       #$c4
+          lda       #tk_then
           jsr       synchr
 @LD9D8:   lda       fac
           bne       LD9E1
 rem:      jsr       remn
           beq       addon
-LD9E1:    jsr       L00B7
+LD9E1:    jsr       chrgot
           bcs       @LD9E9
           jmp       goto
 
-@LD9E9:   jmp       execute_statement
+@LD9E9:   jmp       gone3
 
 ongoto:   jsr       getbyt
           pha
@@ -1542,14 +1548,14 @@ ongoto:   jsr       getbyt
           beq       LD9F8
 LD9F4:    cmp       #tk_goto
           bne       snerr2
-LD9F8:    dec       $a1
+LD9F8:    dec       faclo
           bne       @LDA00
           pla
-          jmp       execute_statement_1
+          jmp       gone2
 
 @LDA00:   jsr       chrget
           jsr       linget
-          cmp       #$2C
+          cmp       #','
           beq       LD9F8
           pla
 LDA0B:    rts
@@ -1558,8 +1564,8 @@ linget:   ldx       #$00
           stx       linnum
           stx       linnum+1
 @LDA12:   bcs       LDA0B
-          sbc       #$2f
-          sta       $0d
+          sbc       #'0'-1
+          sta       charac
           lda       linnum+1
           sta       index
           cmp       #$19
@@ -1577,7 +1583,7 @@ linget:   ldx       #$00
           asl       linnum
           rol       linnum+1
           lda       linnum
-          adc       $0d
+          adc       charac
           sta       linnum
           bcc       @LDA40
           inc       linnum+1
@@ -1587,11 +1593,11 @@ linget:   ldx       #$00
 let:      jsr       ptrget
           sta       forpnt
           sty       forpnt+1
-          lda       #$d0
+          lda       #tk_equ
           jsr       synchr
-          lda       $12
+          lda       intflg
           pha
-          lda       $11
+          lda       valtyp
           pha
           jsr       frmevl
           pla
@@ -1603,10 +1609,10 @@ LDA63:    bpl       @LDA77
           jsr       round_fac
           jsr       ayint
           ldy       #$00
-          lda       $a0
+          lda       facmo
           sta       (forpnt), y
           iny
-          lda       $a1
+          lda       facmo+1
           sta       (forpnt), y
           rts
 
@@ -1615,27 +1621,27 @@ LDA63:    bpl       @LDA77
 let_string:
           pla
 putstr:   ldy       #$02
-          lda       ($a0), y
+          lda       (facmo), y
           cmp       fretop+1
           bcc       @LDA9A
           bne       @LDA8C
           dey
-          lda       ($a0), y
+          lda       (facmo), y
           cmp       fretop
           bcc       @LDA9A
-@LDA8C:   ldy       $a1
+@LDA8C:   ldy       faclo
           cpy       vartab+1
           bcc       @LDA9A
           bne       @LDAA1
-          lda       $a0
+          lda       facmo
           cmp       vartab
           bcs       @LDAA1
-@LDA9A:   lda       $a0
-          ldy       $a1
+@LDA9A:   lda       facmo
+          ldy       facmo+1
           jmp       @LDAB7
 
 @LDAA1:   ldy       #$00
-          lda       ($a0), y
+          lda       (facmo), y
           jsr       strini
           lda       $8c
           ldy       $8d
@@ -1660,7 +1666,7 @@ putstr:   ldy       #$02
 
 pr_string:
           jsr       strprt
-          jsr       L00B7
+          jsr       chrgot
 print:    beq       crdo
 LDAD7:    beq       LDB02
           cmp       #$c0
@@ -1674,7 +1680,7 @@ LDAD7:    beq       LDB02
           beq       pr_next_char
           nop
           jsr       frmevl
-          bit       $11
+          bit       valtyp
           bmi       pr_string
           jsr       fout
           jsr       strlit
@@ -1844,7 +1850,7 @@ process_input_item:
           ldy       $80
           stx       txtptr
           sty       txtptr+1
-          jsr       L00B7
+          jsr       chrgot
           bne       instart
           bit       inpflg
           bvc       @LDC1F
@@ -1861,24 +1867,24 @@ process_input_item:
 @LDC27:   stx       txtptr
           sty       txtptr+1
 instart:  jsr       chrget
-          bit       $11
+          bit       valtyp
           bpl       @LDC63
           bit       inpflg
           bvc       @LDC3F
           inx
           stx       txtptr
           lda       #$00
-          sta       $0d
+          sta       charac
           beq       @LDC4B
 
-@LDC3F:   sta       $0d
+@LDC3F:   sta       charac
           cmp       #$22
           beq       @LDC4C
           lda       #$3a
-          sta       $0d
+          sta       charac
           lda       #$2c
 @LDC4B:   clc
-@LDC4C:   sta       $0e
+@LDC4C:   sta       endchr
           lda       txtptr
           ldy       txtptr+1
           adc       #$00
@@ -1895,10 +1901,10 @@ instart:  jsr       chrget
 
 input_data:
           jsr       fin
-          lda       $12
+          lda       intflg
           jsr       LDA63
 input_more:
-          jsr       L00B7
+          jsr       chrgot
           beq       @LDC7E
           cmp       #$2c
           beq       @LDC7E
@@ -1912,7 +1918,7 @@ input_more:
           ldy       $88
           sta       txtptr
           sty       txtptr+1
-          jsr       L00B7
+          jsr       chrgot
           beq       inpdone
           jsr       chkcom
           jmp       process_input_item
@@ -2015,7 +2021,7 @@ LDD0F:    txs
           adc       #$11
           tax
           txs
-          jsr       L00B7
+          jsr       chrgot
           cmp       #$2c
           bne       @LDD52
           jsr       chrget
@@ -2024,7 +2030,7 @@ frmnum:   jsr       frmevl
 chknum:   clc
           .byte     $24
 chkstr:   sec
-chkval:   bit       $11
+chkval:   bit       valtyp
           bmi       @LDD74
           bcs       @LDD76
 @LDD73:   rts
@@ -2047,7 +2053,7 @@ LDD86:    pha
           jsr       frm_element
           lda       #$00
           sta       $89
-LDD95:    jsr       L00B7
+LDD95:    jsr       chrgot
 @LDD98:   sec
           sbc       #$cf
           bcc       @LDDB4
@@ -2068,7 +2074,7 @@ LDD95:    jsr       L00B7
           bcs       notmath
           adc       #$07
           bcc       notmath
-          adc       $11
+          adc       valtyp
           bne       @LDDC5
           jmp       cat
 
@@ -2092,7 +2098,7 @@ savop:    jsr       frm_recurse
           bne       frm_perform_2
 
 frm_relational:
-          lsr       $11
+          lsr       valtyp
           txa
           rol
           ldx       txtptr
@@ -2133,9 +2139,9 @@ frm_stack_2:
           pha
 frm_stack_3:
           jsr       round_fac
-          lda       $a1
+          lda       facmo+1
           pha
-          lda       $a0
+          lda       facmo
           pha
           lda       $9f
           pha
@@ -2176,7 +2182,7 @@ exit:     lda       fac
 
 frm_element:
           lda       #$00
-          sta       $11
+          sta       valtyp
 @LDE64:   jsr       chrget
           bcs       @LDE6C
 @LDE69:   jmp       fin
@@ -2243,21 +2249,21 @@ equl:     pla
 
 frm_variable:
           jsr       ptrget
-          sta       $a0
-          sty       $a1
-          ldx       $11
+          sta       facmo
+          sty       facmo+1
+          ldx       valtyp
           beq       @LDEE5
           ldx       #$00
           stx       $ac
           rts
 
-@LDEE5:   ldx       $12
+@LDEE5:   ldx       intflg
           bpl       @LDEF6
           ldy       #$00
-          lda       ($a0), y
+          lda       (facmo), y
           tax
           iny
-          lda       ($a0), y
+          lda       (facmo), y
           tay
           txa
           jmp       givayf
@@ -2290,9 +2296,9 @@ unary:    cmp       #$d7
           jsr       chkstr
           pla
           tax
-          lda       $a1
+          lda       facmo+1
           pha
-          lda       $a0
+          lda       facmo
           pha
           txa
           pha
@@ -2338,7 +2344,7 @@ relops:   jsr       chkval
           jmp       numcmp
 
 strcmp:   lda       #$00
-          sta       $11
+          sta       valtyp
           dec       $89
           jsr       frefac
           sta       fac
@@ -2395,22 +2401,22 @@ pdl:      jmp       LD8D5
 nxdim:    jsr       chkcom
 dim:      tax
           jsr       LDFE8
-          jsr       L00B7
+          jsr       chrgot
           bne       nxdim
           rts
 
 ptrget:   ldx       #$00
-          jsr       L00B7
+          jsr       chrgot
 LDFE8:    stx       $10
 LDFEA:    sta       $81
-          jsr       L00B7
+          jsr       chrgot
           jsr       isletc
           bcs       namok
 badnam:   jmp       snerr
 
 namok:    ldx       #$00
-          stx       $11
-          stx       $12
+          stx       valtyp
+          stx       intflg
           bra       LE006
 
           .byte     $ea
@@ -2432,7 +2438,7 @@ LE006:    nop
 @LE01C:   cmp       #$24
           bne       @LE026
           lda       #$ff
-          sta       $11
+          sta       valtyp
           bne       @LE036
 
 @LE026:   cmp       #$25
@@ -2440,7 +2446,7 @@ LE006:    nop
           lda       $14
           bmi       badnam
           lda       #$80
-          sta       $12
+          sta       intflg
           ora       $81
           sta       $81
 @LE036:   txa
@@ -2588,9 +2594,9 @@ mi2:      jmp       qint
 array:    ldy       $14
           bne       @LE169
           lda       $10
-          ora       $12
+          ora       intflg
           pha
-          lda       $11
+          lda       valtyp
           pha
           ldy       #$00
 @LE12C:   tya
@@ -2611,20 +2617,20 @@ array:    ldy       $14
           pha
           lda       stack+1, x
           pha
-          lda       $a0
+          lda       facmo
           sta       stack+2, x
-          lda       $a1
+          lda       facmo+1
           sta       stack+1, x
           iny
-          jsr       L00B7
+          jsr       chrgot
           cmp       #$2c
           beq       @LE12C
           sty       count
           jsr       chkcls
           pla
-          sta       $11
+          sta       valtyp
           pla
-          sta       $12
+          sta       intflg
           and       #$7f
           sta       $10
 @LE169:   ldx       $6b
@@ -2767,9 +2773,9 @@ LE253:    sta       $ae
           iny
           pla
           tax
-          sta       $a0
+          sta       facmo
           pla
-          sta       $a1
+          sta       facmo+1
           cmp       (lowtr), y
           bcc       LE26F
           bne       gse
@@ -2788,11 +2794,11 @@ LE270:    lda       $ae
           beq       @LE281
           jsr       multiply_subscript
           txa
-          adc       $a0
+          adc       facmo
           tax
           tya
           ldy       index
-@LE281:   adc       $a1
+@LE281:   adc       faclo
           stx       $ad
           dec       count
           bne       LE253
@@ -2851,7 +2857,7 @@ LE2B6:    sta       $65
           bne       @LE2C0
           rts
 
-fre:      lda       $11
+fre:      lda       valtyp
           beq       @LE2E5
           jsr       frefac
 @LE2E5:   jsr       garba2
@@ -2862,7 +2868,7 @@ fre:      lda       $11
           lda       fretop+1
           sbc       strend+1
 givayf:   ldx       #$00
-          stx       $11
+          stx       valtyp
           sta       fac+1
           sty       $9f
           ldx       #$90
@@ -2955,7 +2961,7 @@ funct:    jsr       fnc
           sta       $8a
           pla
           sta       $8b
-          jsr       L00B7
+          jsr       chrgot
           beq       @LE3A9
           jmp       snerr
 
@@ -2989,8 +2995,8 @@ str:      jsr       chknum
           ldy       #$00
           beq       strlit
 
-strini:   ldx       $a0
-          ldy       $a1
+strini:   ldx       facmo
+          ldy       facmo+1
           stx       $8c
           sty       $8d
 strspa:   jsr       getspa
@@ -3000,8 +3006,8 @@ strspa:   jsr       getspa
           rts
 
 strlit:   ldx       #$22
-          stx       $0d
-          stx       $0e
+          stx       charac
+          stx       endchr
 LE3ED:    sta       $ab
           sty       $ac
           sta       fac+1
@@ -3010,9 +3016,9 @@ LE3ED:    sta       $ab
 @LE3F7:   iny
           lda       ($ab), y
           beq       @LE408
-          cmp       $0d
+          cmp       charac
           beq       @LE404
-          cmp       $0e
+          cmp       endchr
           bne       @LE3F7
 @LE404:   cmp       #$22
           beq       @LE409
@@ -3048,10 +3054,10 @@ putemp:   lda       fac
           lda       $9f
           sta       $02, x
           ldy       #$00
-          stx       $a0
-          sty       $a1
+          stx       facmo
+          sty       facmo+1
           dey
-          sty       $11
+          sty       valtyp
           stx       $53
           inx
           inx
@@ -3242,9 +3248,9 @@ move_highest_string_to_top:
           sta       ($8a), y
           jmp       find_highest_string
 
-cat:      lda       $a1
+cat:      lda       facmo+1
           pha
-          lda       $a0
+          lda       facmo
           pha
           jsr       frm_element
           jsr       chkstr
@@ -3255,7 +3261,7 @@ cat:      lda       $a1
           ldy       #$00
           lda       ($ab), y
           clc
-          adc       ($a0), y
+          adc       (facmo), y
           bcc       @LE5B7
           ldx       #e_ls
           jmp       error
@@ -3302,8 +3308,8 @@ movstr_1:
 @LE5FC:   rts
 
 frestr:   jsr       chkstr
-frefac:   lda       $a0
-          ldy       $a1
+frefac:   lda       facmo
+          ldy       facmo+1
 fretmp:   sta       index
           sty       index+1
           jsr       fretms
@@ -3391,8 +3397,8 @@ rightstr:
           jmp       LE660
 
 midstr:   lda       #$ff
-          sta       $a1
-          jsr       L00B7
+          sta       faclo
+          jsr       chrgot
           cmp       #$29
           beq       @LE6A2
           jsr       chkcom
@@ -3406,9 +3412,9 @@ midstr:   lda       #$ff
           sbc       ($8c), y
           bcs       LE667
           eor       #$ff
-          cmp       $a1
+          cmp       faclo
           bcc       LE668
-          lda       $a1
+          lda       faclo
           bcs       LE668
 
 substring_setup:
@@ -3439,7 +3445,7 @@ len:      jsr       getstr
 
 getstr:   jsr       frestr
           ldx       #$00
-          stx       $11
+          stx       valtyp
           tay
           rts
 
@@ -3455,10 +3461,10 @@ goiq:     jmp       iqerr
 gtbytc:   jsr       chrget
 getbyt:   jsr       frmnum
 conint:   jsr       mkint
-          ldx       $a0
+          ldx       facmo
           bne       goiq
-          ldx       $a1
-          jmp       L00B7
+          ldx       facmo+1
+          jmp       chrgot
 
 val:      jsr       getstr
           bne       @LE70F
@@ -3483,7 +3489,7 @@ val:      jsr       getstr
           pha
           lda       #$00
           sta       (dest), y
-          jsr       L00B7
+          jsr       chrgot
           jsr       fin
           pla
           ldy       #$00
@@ -3503,8 +3509,8 @@ getadr:   lda       fac
           cmp       #$91
           bcs       goiq
           jsr       qint
-          lda       $a0
-          ldy       $a1
+          lda       facmo
+          ldy       facmo+1
           sty       linnum
           sta       linnum+1
           rts
@@ -3532,7 +3538,7 @@ poke:     jsr       gtnum
 wait:     jsr       gtnum
           stx       forpnt
           ldx       #$00
-          jsr       L00B7
+          jsr       chrgot
           beq       @LE793
           jsr       LE74C
 @LE793:   stx       forpnt+1
@@ -3602,10 +3608,10 @@ LE7FA:    bit       $ab
           sta       $ac
           lda       $0004, y
           sbc       $04, x
-          sta       $a1
+          sta       facmo+1
           lda       $0003, y
           sbc       $03, x
-          sta       $a0
+          sta       facmo
           lda       $0002, y
           sbc       $02, x
           sta       $9f
@@ -3623,12 +3629,12 @@ normalize_fac_2:
           bne       LE880
           ldx       $9f
           stx       fac+1
-          ldx       $a0
+          ldx       facmo
           stx       $9f
-          ldx       $a1
-          stx       $a0
+          ldx       faclo
+          stx       facmo
           ldx       $ac
-          stx       $a1
+          stx       faclo
           sty       $ac
           adc       #$08
           cmp       #$20
@@ -3643,12 +3649,12 @@ sta_in_fac_sign:
 
 fadd_4:   adc       $92
           sta       $ac
-          lda       $a1
+          lda       faclo
           adc       $a9
-          sta       $a1
-          lda       $a0
+          sta       faclo
+          lda       facmo
           adc       $a8
-          sta       $a0
+          sta       facmo
           lda       $9f
           adc       $a7
           sta       $9f
@@ -3660,8 +3666,8 @@ fadd_4:   adc       $92
 normalize_fac_3:
           adc       #$01
           asl       $ac
-          rol       $a1
-          rol       $a0
+          rol       faclo
+          rol       facmo
           rol       $9f
           rol       fac+1
 LE880:    bpl       normalize_fac_3
@@ -3676,8 +3682,8 @@ LE88F:    inc       fac
           beq       overflow
           ror       fac+1
           ror       $9f
-          ror       $a0
-          ror       $a1
+          ror       facmo
+          ror       faclo
           ror       $ac
 LE89D:    rts
 
@@ -3692,21 +3698,21 @@ complement_fac_mantissa:
           lda       $9f
           eor       #$ff
           sta       $9f
-          lda       $a0
+          lda       facmo
           eor       #$ff
-          sta       $a0
-          lda       $a1
+          sta       facmo
+          lda       faclo
           eor       #$ff
-          sta       $a1
+          sta       faclo
           lda       $ac
           eor       #$ff
           sta       $ac
           inc       $ac
           bne       LE8D4
 increment_fac_mantissa:
-          inc       $a1
+          inc       faclo
           bne       LE8D4
-          inc       $a0
+          inc       facmo
           bne       LE8D4
           inc       $9f
           bne       LE8D4
@@ -3840,9 +3846,9 @@ TE982:    bne       @LE987
           sta       $65
           lda       $ac
           jsr       multiply_1
-          lda       $a1
+          lda       faclo
           jsr       multiply_1
-          lda       $a0
+          lda       facmo
           jsr       multiply_1
           lda       $9f
           jsr       multiply_1
@@ -3983,10 +3989,10 @@ fdivt:    beq       @LEAE1
           cpy       $9f
           bne       @LEA96
           ldy       $a8
-          cpy       $a0
+          cpy       facmo
           bne       @LEA96
           ldy       $a9
-          cpy       $a1
+          cpy       faclo
 @LEA96:   php
           rol
           bcc       @LEAA3
@@ -4007,10 +4013,10 @@ fdivt:    beq       @LEAE1
 
 @LEAB4:   tay
           lda       $a9
-          sbc       $a1
+          sbc       faclo
           sta       $a9
           lda       $a8
-          sbc       $a0
+          sbc       facmo
           sta       $a8
           lda       $a7
           sbc       $9f
@@ -4043,9 +4049,9 @@ copy_result_into_fac:
           lda       $63
           sta       $9f
           lda       $64
-          sta       $a0
+          sta       facmo
           lda       $65
-          sta       $a1
+          sta       faclo
           jmp       normalize_fac_2
 
 load_fac_from_ya:
@@ -4053,10 +4059,10 @@ load_fac_from_ya:
           sty       index+1
           ldy       #$04
           lda       (index), y
-          sta       $a1
+          sta       faclo
           dey
           lda       (index), y
-          sta       $a0
+          sta       facmo
           dey
           lda       (index), y
           sta       $9f
@@ -4086,10 +4092,10 @@ store_fac_at_yx_rounded:
           stx       index
           sty       index+1
           ldy       #$04
-          lda       $a1
+          lda       faclo
           sta       (index), y
           dey
-          lda       $a0
+          lda       facmo
           sta       (index), y
           dey
           lda       $9f
@@ -4154,8 +4160,8 @@ float_1:  lda       fac+1
           eor       #$ff
           rol
 float_2:  lda       #$00
-          sta       $a1
-          sta       $a0
+          sta       faclo
+          sta       facmo
           stx       fac
           sta       $ac
           sta       $a2
@@ -4186,13 +4192,13 @@ fcomp2:   sty       dest+1
           bne       @LEBE9
           iny
           lda       (dest), y
-          cmp       $a0
+          cmp       facmo
           bne       @LEBE9
           iny
           lda       #$7f
           cmp       $ac
           lda       (dest), y
-          sbc       $a1
+          sbc       faclo
           beq       LEC11
 @LEBE9:   lda       $a2
           bcc       @LEBEF
@@ -4238,14 +4244,14 @@ int:      lda       fac
           rol
           lda       #$a0
           sta       fac
-          lda       $a1
-          sta       $0d
+          lda       faclo
+          sta       charac
           jmp       normalize_fac_1
 
 qint_3:   sta       fac+1
           sta       $9f
-          sta       $a0
-          sta       $a1
+          sta       facmo
+          sta       faclo
           tay
 LEC49:    rts
 
@@ -4456,13 +4462,13 @@ fout_1:   bit       $a2
 @LEDBB:   sty       $ad
 @LEDBD:   ldy       #$00
           ldx       #$80
-@LEDC1:   lda       $a1
+@LEDC1:   lda       faclo
           clc
           adc       @LEE6C, y
-          sta       $a1
-          lda       $a0
+          sta       faclo
+          lda       facmo
           adc       @LEE6B, y
-          sta       $a0
+          sta       facmo
           lda       $9f
           adc       @LEE6A, y
           sta       $9f
@@ -4606,7 +4612,7 @@ TEE97:    beq       exp
           jsr       fcomp
           bne       @LEEBA
           tya
-          ldy       $0d
+          ldy       charac
 @LEEBA:   jsr       LEB55
           tya
           pha
@@ -4679,7 +4685,7 @@ exp:      lda       #$db
           bcc       @LEF27
 @LEF24:   jsr       outofrng
 @LEF27:   jsr       int
-          lda       $0d
+          lda       charac
           clc
           adc       #$81
           beq       @LEF24
@@ -4769,9 +4775,9 @@ rnd:      jsr       sign
           lda       #$aa
           ldy       #$ef
           jsr       fadd
-@LEFCC:   ldx       $a1
+@LEFCC:   ldx       faclo
           lda       fac+1
-          sta       $a1
+          sta       faclo
           stx       fac+1
           lda       #$00
           sta       $a2
@@ -4974,9 +4980,9 @@ atn:      lda       $a2
 orgchget:
           .org      $00b1
 chrget:   inc       txtptr
-          bne       L00B7
+          bne       chrgot
           inc       txtptr+1
-L00B7:    lda       LEA60               ; TXTPTR points here
+chrgot:    lda       LEA60               ; TXTPTR points here
           cmp       #$3a
           bcs       @L00C8
           cmp       #$20
@@ -5271,7 +5277,7 @@ handlerr:
           bpl       @LF2ED
           lda       $f8
           sta       $df
-          jsr       L00B7
+          jsr       chrgot
           jsr       fndlin
           jsr       LD95E
 LF30D:    jmp       newstt
@@ -5871,7 +5877,7 @@ LF72D:    jmp       iqerr
 
 LF734:    jsr       LF7BF
           sta       $e5
-          jsr       L00B7
+          jsr       chrgot
           cmp       #tk_at
           bne       @LF74C
           jsr       chrget
