@@ -88,11 +88,15 @@
 usrvec     =        $0A
 
 count      =        $0F
+cqprmp     =        $33
+linnum     =        $50
 index      =        $5E
 dest       =        $60
+txttab     =        $67
 vartab     =        $69
 strend     =        $6D
 fretop     =        $6F
+memsiz     =        $73
 curlin     =        $75
 forpnt     =        $85
 temp1      =        $93
@@ -105,10 +109,14 @@ txtptr     =        $B8
 errflg     =        $D8
 
 stack      =        $0100
+inpbuf     =        $0200
 
 ampvec     =        $03F5
 
 home       =        $FC58
+getch      =        $FD0C
+getlin     =        $FD6A
+putch      =        $FDED
 
           .org      $D000
 
@@ -700,14 +708,14 @@ islin:    ldx       prgend+1            ; Squash variable table
           jsr       crunch
           sty       count
           jsr       fndlin
-          bcc       put_new_line
+          bcc       nodel
           jsr       LF336
           lda       (lowtr)
           tax
           ldy       #$01
           lda       (lowtr), y
           jsr       LF33F
-          bra       put_new_line
+          bra       nodel
 
 LD480:    jsr       linget
           jsr       fndlin
@@ -715,29 +723,28 @@ LD480:    jsr       linget
           jsr       chkcom
           jsr       linget
           jsr       fndlin
-          bcc       @LD49D
+          bcc       @1
           lda       (lowtr)
           tax
           ldy       #$01
           lda       (lowtr), y
-          bra       @LD4A1
+          bra       @2
 
-@LD49D:   ldx       lowtr
+@1:       ldx       lowtr
           lda       lowtr+1
-@LD4A1:   cpx       dest
+@2:       cpx       dest
           pha
           sbc       dest+1
           pla
-          bcc       @LD4AE
+          bcc       @3
           jsr       LF33F
           bra       fix_links
 
-@LD4AE:   rts
+@3:       rts
 
           .res      6,$ff
 
-put_new_line:
-          ldy       $0200
+nodel:    ldy       inpbuf
           beq       fix_links
           lda       vartab
           sta       hightr
@@ -749,30 +756,30 @@ put_new_line:
           bcc       @LD4CA
           iny
 @LD4CA:   sty       highds+1
-          ldx       $74
+          ldx       memsiz+1
           stx       fretop+1
-          ldx       $73
+          ldx       memsiz
           stx       fretop
           jsr       bltu
           ldx       #$01
 @LD4D9:   lda       strend, x
           sta       vartab, x
-          lda       $50, x
-          sta       $01fe, x
+          lda       linnum, x
+          sta       $01FE, x
           dex
           bpl       @LD4D9
           ldy       count
 @LD4E7:   dey
-          lda       $01fc, y
+          lda       $01FC, y
           sta       (lowtr), y
           tya
           bne       @LD4E7
           nop
           nop
 fix_links:
-          jsr       setptrs
-          lda       $67
-          ldy       $68
+          jsr       runc
+          lda       txttab
+          ldy       txttab+1
           sta       index
           sty       index+1
           clc
@@ -794,7 +801,7 @@ fix_links:
           sta       (index), y
           stx       index
           sta       index+1
-          bra       @LD4FE
+          bne       @LD4FE              ; ALWAYS
 
 @LD520:   lda       vartab
           ldy       vartab+1
@@ -805,28 +812,26 @@ fix_links:
           .byte     $ff
 
 inlin:    ldx       #$80
-inlin2:   stx       $33
-          jmp       LD8B6
+inlin2:   stx       cqprmp
+          jmp       cqinln
 
-LD533:    jsr       $fd0c
+LD533:    jsr       getch
           asl
           lsr
           rts
 
-          .byte     $4c
-          .byte     $bf
-          .byte     $d8
+          jmp       LD8BF
 
 LD53C:    iny
-          sta       $01fb, y
+          sta       $01FB, y
 LD540:    inx
-          lda       $01ff, x
+          lda       $01FF, x
           bne       LD53C
           rts
 
 LD547:    lda       #$d0
           sta       fac
-          lda       #$d0
+          lda       #$d0                ; REDUNDANT
           sta       fac+1
           rts
 
@@ -840,8 +845,7 @@ inchr:    jmp       LD533
           .byte     $ff
           .byte     $ff
 
-crunch:
-          ldx       txtptr
+crunch:   ldx       txtptr
           ldy       #$04
           lda       $d6
           asl
@@ -850,7 +854,7 @@ crunch:
           nop
           nop
           nop
-          jsr       setptrs
+          jsr       runc
           jmp       LD6EF
 
 parse:    inx
@@ -901,7 +905,7 @@ parse:    inx
           lda       $13
           cmp       #$c5
           bne       @LD5E0
-          lda       $0200, x
+          lda       inpbuf, x
           jsr       LF3CB
           cmp       #$4f
           beq       @LD59A
@@ -947,8 +951,8 @@ LD60F:    iny
           .byte     $ff
           .byte     $ff
 
-fndlin:   lda       $67
-          ldx       $68
+fndlin:   lda       txttab
+          ldx       txttab+1
 LD61E:    ldy       #$01
           sta       lowtr
           stx       lowtr+1
@@ -956,13 +960,13 @@ LD61E:    ldy       #$01
           beq       @LD647
           iny
           iny
-          lda       $51
+          lda       linnum+1
           cmp       (lowtr), y
           bcc       LD648
           beq       @LD635
           dey
           bne       @LD63E
-@LD635:   lda       $50
+@LD635:   lda       linnum
           dey
           cmp       (lowtr), y
           bcc       LD648
@@ -981,22 +985,22 @@ new:      bne       LD648
 scrtch:   lda       #$00
           tay
           sta       $d6
-          sta       ($67), y
+          sta       (txttab), y
           iny
-          sta       ($67), y
-          lda       $67
+          sta       (txttab), y
+          lda       txttab
           adc       #$02
           sta       prgend
           sta       vartab
-          lda       $68
+          lda       txttab+1
           adc       #$00
           sta       prgend+1
           sta       vartab+1
-setptrs:  jsr       stxtpt
+runc:  jsr       stxtpt
           lda       #$00
 clear:    bne       LD696
-clearc:   lda       $73
-          ldy       $74
+clearc:   lda       memsiz
+          ldy       memsiz+1
           sta       fretop
           sty       fretop+1
           lda       vartab
@@ -1022,10 +1026,10 @@ stkini:   ldx       #$55
 LD696:    rts
 
 stxtpt:   clc
-          lda       $67
+          lda       txttab
           adc       #$ff
           sta       txtptr
-          lda       $68
+          lda       txttab+1
           adc       #$ff
           sta       txtptr+1
           rts
@@ -1047,13 +1051,13 @@ list:     jsr       linget
           jsr       iscntc
           jsr       crdo
           iny
-          lda       $50
-          ora       $51
+          lda       linnum
+          ora       linnum+1
           beq       @LD6DC
-          lda       $50
+          lda       linnum
           cmp       (lowtr), y
           iny
-          lda       $51
+          lda       linnum+1
           sbc       (lowtr), y
           bcc       @LD6EC
 @LD6DC:   jsr       LD6F3
@@ -1225,7 +1229,7 @@ newstt:   tsx
           sta       txtptr
           bcc       gone
           inc       txtptr+1
-gone:   lda       curlin+1
+gone:     lda       curlin+1
           inc
           beq       @LD81D
           lda       $f2
@@ -1268,9 +1272,9 @@ LD842:    cmp       #$3a
 LD846:    jmp       snerr
 
 restore:  sec
-          lda       $67
+          lda       txttab
           sbc       #$01
-          ldy       $68
+          ldy       txttab+1
           bcs       setda
           dey
 setda:    sta       $7d
@@ -1332,17 +1336,17 @@ LD8AF:    rts
 LD8B0:    jsr       outqst
           jmp       inlin
 
-LD8B6:    jsr       $fd6a
-          cpx       #$ef
-          bcc       @LD8BF
-          ldx       #$ef
-@LD8BF:   stz       $0200, x
+cqinln:   jsr       getlin              ; Request line from monitor
+          cpx       #$EF                ; Cap input line length to 239
+          bcc       LD8BF
+          ldx       #$EF
+LD8BF:    stz       inpbuf, x
           txa
           beq       @LD8D0
-@LD8C5:   lda       $01ff, x
+@LD8C5:   lda       $01FF, x
           asl
           lsr
-          sta       $01ff, x
+          sta       $01FF, x
           dex
           bne       @LD8C5
 @LD8D0:   txa
@@ -1398,7 +1402,7 @@ run:      php
           dec       curlin+1
           plp
           bne       @1
-          jmp       setptrs
+          jmp       runc
 @1:       jsr       clearc
           jmp       go_to_line
 
@@ -1422,7 +1426,7 @@ go_to_line:
 goto:     jsr       linget
           jsr       remn
           lda       curlin+1
-          cmp       $51
+          cmp       linnum+1
           bcs       @LD955
           tya
           sec
@@ -1432,8 +1436,8 @@ goto:     jsr       linget
           inx
           bcs       @LD959
 
-@LD955:   lda       $67
-          ldx       $68
+@LD955:   lda       txttab
+          ldx       txttab+1
 @LD959:   jsr       LD61E
           bcc       userr
 LD95E:    lda       lowtr
@@ -1543,32 +1547,32 @@ LD9F8:    dec       $a1
 LDA0B:    rts
 
 linget:   ldx       #$00
-          stx       $50
-          stx       $51
+          stx       linnum
+          stx       linnum+1
 @LDA12:   bcs       LDA0B
           sbc       #$2f
           sta       $0d
-          lda       $51
+          lda       linnum+1
           sta       index
           cmp       #$19
           bcs       LD9F4
-          lda       $50
+          lda       linnum
           asl
           rol       index
           asl
           rol       index
-          adc       $50
-          sta       $50
+          adc       linnum
+          sta       linnum
           lda       index
-          adc       $51
-          sta       $51
-          asl       $50
-          rol       $51
-          lda       $50
+          adc       linnum+1
+          sta       linnum+1
+          asl       linnum
+          rol       linnum+1
+          lda       linnum
           adc       $0d
-          sta       $50
+          sta       linnum
           bcc       @LDA40
-          inc       $51
+          inc       linnum+1
 @LDA40:   jsr       chrget
           jmp       @LDA12
 
@@ -1714,9 +1718,7 @@ pr_next_char:
           bra       LDAD7
 
 LDB34:    jsr       crdo
-          bra       pr_next_char
-
-          .byte     $ff
+          jmp       pr_next_char
 
 strout:   jsr       strlit
 strprt:   jsr       frefac
@@ -1733,9 +1735,9 @@ strprt:   jsr       frefac
           jsr       LDB00
           jmp       @LDB44
 
-outspc:   lda       #$20
+outspc:   lda       #' '
           .byte     $2c
-outqst:   lda       #$3f
+outqst:   lda       #'?'
 outdo:    bit       #$60
           beq       @LDB68
           bit       $32
@@ -1743,7 +1745,7 @@ outdo:    bit       #$60
           bvc       @LDB68
           ora       #$40
 @LDB68:   ora       #$80
-          jsr       $fded
+          jsr       putch
           jmp       LD757
 
           .byte     $ea
@@ -1763,13 +1765,12 @@ LDB83:    jmp       snerr
 
           .byte     $ff
 
-resperr:  ldx       #$fe
+resperr:  ldx       #$fe                ; If ONERR is set, raise error 254.
           lda       errflg
-          bpl       @LDB90
+          bpl       @1
           jmp       handlerr
-
-@LDB90:   lda       #$ef
-          ldy       #$dc
+@1:       lda       #<m_reent           ; Otherwise, write ?REENTER
+          ldy       #>m_reent
           jsr       strout
           lda       $79
           ldy       $7a
@@ -1778,17 +1779,16 @@ resperr:  ldx       #$fe
           rts
 
 get:      jsr       errdir
-          lda       #$01
-          tax
-          inc
-          tay
+          ldx       #<(inpbuf+1)
+          ldy       #>(inpbuf+1)
+          lda       #$00
+          sta       inpbuf+1
           lda       #$40
-          stz       $0201
-          bra       process_input_list
+          bne       process_input_list  ; ALWAYS
 
           nop
           nop
-          nop
+
 input:    cmp       #$22
           bne       @LDBC4
           jsr       strtxt
@@ -1805,7 +1805,7 @@ input:    cmp       #$22
           sta       $01ff
           jsr       inlin
           lda       #$03
-          cmp       $0200
+          cmp       inpbuf
           bne       input_flag_zero
           jmp       control_c_typed
 
@@ -1840,11 +1840,11 @@ process_input_item:
           bne       instart
           bit       $15
           bvc       @LDC1F
-          jsr       $fd0c
+          jsr       getch
           ldx       #$ff
           ldy       #$01
           and       #$7f
-          sta       $0200
+          sta       inpbuf
           bra       @LDC27
 
 @LDC1F:   bmi       findata
@@ -1881,7 +1881,7 @@ instart:  jsr       chrget
           jsr       putstr
           jmp       input_more
 
-@LDC63:   ldx       $0200
+@LDC63:   ldx       inpbuf
           bne       input_data
           beq       inpfin
 
@@ -3080,8 +3080,8 @@ getspa:   lsr       $13
           sta       $13
           pla
           bne       @LE454
-garba2:   ldx       $73
-          lda       $74
+garba2:   ldx       memsiz
+          lda       memsiz+1
 find_highest_string:
           stx       fretop
           sta       fretop+1
@@ -3497,28 +3497,28 @@ getadr:   lda       fac
           jsr       qint
           lda       $a0
           ldy       $a1
-          sty       $50
-          sta       $51
+          sty       linnum
+          sta       linnum+1
           rts
 
-peek:     lda       $51
+peek:     lda       linnum+1
           pha
-          lda       $50
+          lda       linnum
           pha
           jsr       getadr
           ldy       #$00
-          lda       ($50), y
+          lda       (linnum), y
           tay
           pla
-          sta       $50
+          sta       linnum
           pla
-          sta       $51
+          sta       linnum+1
           jmp       sngflt
 
 poke:     jsr       gtnum
           txa
           ldy       #$00
-          sta       ($50), y
+          sta       (linnum), y
           rts
 
 wait:     jsr       gtnum
@@ -3529,7 +3529,7 @@ wait:     jsr       gtnum
           jsr       LE74C
 @LE793:   stx       forpnt+1
           ldy       #$00
-@LE797:   lda       ($50), y
+@LE797:   lda       (linnum), y
           eor       forpnt+1
           and       forpnt
           beq       @LE797
@@ -5021,20 +5021,20 @@ cold_start:
           inx
           stx       $01fd
           stx       $01fc
-          stx       $67
+          stx       txttab
           inx
           inx
           stx       $8f
           jsr       crdo
           ldy       #$c0
-          stz       $73
-          sty       $74
+          stz       memsiz
+          sty       memsiz+1
           stz       fretop
           sty       fretop+1
           ldy       #$08
-          stz       $50
-          sty       $51
-          sty       $68
+          stz       linnum
+          sty       linnum+1
+          sty       txttab+1
           stz       $0800
           lda       #$55
           sta       $52
@@ -5206,8 +5206,8 @@ himem:    jsr       LF798
           cpy       strend
           sbc       strend+1
           bcc       LF2BE
-          sty       $73
-          stx       $74
+          sty       memsiz
+          stx       memsiz+1
           sty       fretop
           stx       fretop+1
           rts
@@ -5220,8 +5220,8 @@ lomem:    jsr       LF798
           sbc       vartab+1
           bcc       LF2BE
           txa
-          cpy       $73
-          sbc       $74
+          cpy       memsiz
+          sbc       memsiz+1
           bcs       LF2BE
           sty       vartab
           stx       vartab+1
@@ -5235,8 +5235,8 @@ onerr:    cmp       #$ab
           bne       LF2E4
           jsr       chrget
           jsr       linget
-          lda       $50
-          ldx       $51
+          lda       linnum
+          ldx       linnum+1
           sta       $f6
           stx       $f7
           lda       #$80
@@ -5256,7 +5256,7 @@ handlerr:
           lda       curlin, x
           sta       $da, x
           lda       $f6, x
-          sta       $50, x
+          sta       linnum, x
           lda       $f4, x
           sta       txtptr, x
           dex
@@ -5642,7 +5642,7 @@ LF542:    lda       $d2
           bne       @LF55E
           dec       $d1
           bmi       LF608
-          bra       @LF55E
+          bpl       @LF55E
 
           .byte     $ff
           .byte     $ff
