@@ -21,7 +21,7 @@
 ; THE SOFTWARE.
 ; ============================================================================
 
-; This code last touched: 25121515
+; This code last touched: 25121516
 
 ; ============================================================================
 ; The current understanding of the legal status of this code is as follows:
@@ -116,6 +116,7 @@ inpbuf     =        $0200
 
 ampvec     =        $03F5
 
+monspc     =        $F94A
 home       =        $FC58
 getch      =        $FD0C
 getlin     =        $FD6A
@@ -358,7 +359,8 @@ mathtbl:  .byte     $79
 ; ============================================================================
 ; The Laser 128 version of BASIC simply removes SHLOAD, LOAD and SAVE tokens,
 ; replacing them with 0x80.  This makes some code that uses & metacommands
-; unusable from the command line.
+; unusable from the command line.  The tokens are restored, but they'll cause
+; Undefined Statement errors if used.
 ; ============================================================================
 
 toktbl:   asct      "END"
@@ -924,11 +926,11 @@ parse:    inx
           jsr       LF3CB
 @LD5E0:   iny
           sta       $01fb, y
-          cmp       #$b2
+          cmp       #tk_rem
           beq       @LD5F8
-          cmp       #$83
+          cmp       #tk_data
           beq       @LD608
-          cmp       #$22
+          cmp       #'"'
           bne       @LD5F5
           jsr       LF3B9
           beq       @LD5FB
@@ -945,7 +947,7 @@ parse:    inx
 
 @LD608:   jsr       LF3A5
           beq       @LD5FB
-          bra       @LD5F5
+          bne       @LD5F5              ; ALWAYS
 
 LD60F:    iny
           bne       @LD615
@@ -1043,9 +1045,9 @@ stxtpt:   clc
 list:     jsr       linget
           jsr       fndlin
           jsr       L00B7
-          cmp       #$2c
+          cmp       #','
           beq       @LD6B6
-          cmp       #$c9
+          cmp       #tk_sub
           bne       @LD6BC
 @LD6B6:   jsr       chrget
           jsr       linget
@@ -1088,7 +1090,7 @@ LD6F3:    jsr       outspc
           lda       (lowtr), y
           jsr       linprt
           ldy       #$03
-LD703:    lda       #$20
+LD703:    lda       #' '
 @LD705:   jsr       outdo
           iny
           lda       #32
@@ -1097,22 +1099,22 @@ LD703:    lda       #$20
           bpl       @LD712
           lda       #72
 .endif
-@LD712:   cmp       $24
-          bcs       @LD71E
-          jsr       crdo
+@LD712:   cmp       $24                 ; Over the margin?
+          bcs       @LD71E              ; No, skip
+          jsr       crdo                ; Newline and 5 spaces
           ldx       #$05
-          jsr       $f94a
+          jsr       monspc
 @LD71E:   lda       (lowtr), y
           beq       LD6F2
           bpl       @LD705
           sec
           sbc       #$7f
           tax
-          bra       LD72F
+          jmp       LD72F
 .ifdef    iie
-          .res      2, $FF
+          .res      1, $FF
 .else
-          .res      9, $FF
+          .res      8, $FF
 .endif
 
 getchr:   jmp       LD60F
@@ -1137,7 +1139,7 @@ LD72F:    jsr       LD547
           jsr       outdo
           pla
           bpl       @LD746
-          bra       LD703
+          bmi       LD703               ; ALWAYS
 
 LD757:    pha
           lda       $f1
@@ -1194,7 +1196,7 @@ step:     lda       #$13
           ldy       #$e9
           jsr       load_fac_from_ya
           jsr       L00B7
-          cmp       #$c7
+          cmp       #tk_step
           bne       @LD7C3
           jsr       chrget
           jsr       frmnum
@@ -5382,7 +5384,7 @@ LF3CB:    cmp       #$61
 hgr2:     lda       #$40
           stx       $c052
           stx       $c055
-          bra       sethpg
+          bne       sethpg              ; ALWAYS
 
 hgr:      stx       $c053
           stx       $c054
@@ -5390,7 +5392,7 @@ hgr:      stx       $c053
 sethpg:   sta       $e6
           stx       $c050
           stx       $c057
-          bra       @LF3FE
+          bne       @LF3FE              ; ALWAYS
 
           bra       @LF3F8
 
@@ -5887,11 +5889,11 @@ LF734:    jsr       LF7BF
 
 draw:     lda       #$00
           sta       $e3
-          bra       LF734
+          beq       LF734               ; ALWAYS
 
 xdraw:    lda       #$80
           sta       $e3
-          bra       LF734
+          bne       LF734               ; ALWAYS
 
 LF775:    lda       ($e8)
           cmp       $e5
