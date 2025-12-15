@@ -853,7 +853,7 @@ inchr:    jsr       getch
 ; ============================================================================
 
 crunch:   ldx       txtptr
-          dex
+          nop
           ldy       #$04
           sty       dores
           bit       protect
@@ -864,7 +864,7 @@ crunch:   ldx       txtptr
           jmp       newstt
 
 parse:    inx
-          lda       inpbuf, x
+          lda       inpbuf-1, x
           bne       @LD575
           jmp       @LD5FB
 
