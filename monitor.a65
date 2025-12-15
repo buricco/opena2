@@ -1,0 +1,974 @@
+; ============================================================================
+; Copyright 2012-2025 S. V. Nickolas.
+;
+; Permission is hereby granted, free of charge, to any person obtaining a copy
+; of this software and associated documentation files (the Software), to deal
+; in the Software without restriction, including without limitation the rights
+; to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+; copies of the Software, and to permit persons to whom the Software is
+; furnished to do so, subject to the following conditions:
+;
+; The above copyright notice and this permission notice shall be included in
+; all copies or substantial portions of the Software.
+;
+; THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+; IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+; FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE
+; AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+; LIABILITY, WHETHER IN AN ACTION OF CONTRACT,TORT OR OTHERWISE, ARISING FROM,
+; OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+; THE SOFTWARE.
+; ============================================================================
+
+; This code last touched: 25121508
+
+; Free replacement for the Apple ][/][+ monitor rom
+; (20 missing function calls, 8 possibly useful/12 related to the debugger)
+;
+; This firmware does NOT contain a debugger, allowing me room for my doofus
+; code, which takes up a bit more room than the Woz's code.
+;
+; Some code is very buggy or possibly nonfunctional.
+;
+; Under the hood, this is VERY different from the Apple monitor ROM.
+;
+; NOTE: This code assumes 65C02!
+;
+; Generally: The less a program relies on the firmware, the better it will
+; work.  FPBASIC works well enough; this code was specifically tuned to the
+; needs of FPBASIC.  INTBASIC does not work correctly.
+;
+; It seems a fair number of breaker bugs may relate to the way GETLIN is 
+; handled and the "lookup table" method of handling the screen instead of
+; calculation.
+
+          .pc02
+          .org      $F800
+
+.macro    aschi     str
+          .repeat   .strlen(str), I
+                    .byte     .strat(str,I)+$80
+          .endrep
+.endmacro
+
+linbase    =        $28
+
+endlinx    =        $2C
+endliny    =        $2D
+
+plotcol    =        $30
+tmpadr     =        $3C
+tmpadr2    =        $3E
+target     =        $42
+
+sava       =        $45
+savx       =        $46
+savy       =        $47
+savp       =        $48
+savs       =        $49
+savip      =        $3A
+          
+; F800 - PLOT (y=column a=line)
+
+plot:     pha                 ; store row for later
+          and       #$FE      ; mask off odd bit
+          tax
+          jsr       mkgad
+          pla                 ; recover it and determine which way to mask
+          nop
+          nop
+          nop
+          nop
+          nop
+          nop
+          nop
+          and       #$01
+          jmp       plot2
+
+; F819 - HLIN (start at y,x and move to $2C)
+hlpat:    bcc       hlin
+          beq       hlin
+          rts
+hlin:     phx
+          phy
+          pha
+          jsr       plot
+          pla
+          ply
+          plx
+          iny
+          cpy       endlinx
+          bra       hlpat
+
+          nop
+
+; F828 - VLIN (start at a,x and move to $2C)
+vlin:     phx
+          phy
+          pha
+          jsr       plot
+          pla
+          ply
+          bra       vlin1
+vgclrscr: nop
+          nop
+          nop
+          nop
+vgclrtop: jmp       gclrscr
+vlin1:    plx
+          inc
+          cmp       endliny
+          bcc       vlin
+          beq       vlin
+          rts
+
+plot2:    beq       even
+          lda       (tmpadr2), y
+          and       #$0F
+          sta       tmpadr2+2
+          lda       plotcol
+          and       #$F0
+          bra       plot3
+even:     lda       (tmpadr2), y
+          and       #$F0
+          sta       tmpadr2+2
+          lda       plotcol
+          and       #$0F
+plot3:    ora       tmpadr2+2  ; combine the pixel already plotted with new one
+          sta       (tmpadr2), y
+          rts
+
+; F864 - COLOR= (from A&15, *0x11, to $30)
+          .res      $F85F-*
+colp3:    lda       plotcol
+          inc
+          inc
+          inc
+          
+color:    and       #$0F
+          sta       plotcol
+          asl
+          asl
+          asl
+          asl
+          ora       plotcol
+          sta       plotcol
+          rts
+
+; F871 - SCRN (y,a to a)
+scrn:     pha
+          and       #$FE                ; offset into table
+          tax
+          lda       ttytab, x
+          sta       tmpadr2
+          lda       ttytab+1, x
+          sta       tmpadr2+1
+          pla                           ; get it back
+          tax                           ; to X, too
+          and       #$01                ; even or odd?
+          beq       scrn1
+          lda       (tmpadr2), y
+          and       #$F0                ; odd: take the high nibble
+          lsr
+          lsr
+          lsr
+          lsr
+          rts
+vgetlen:  jmp       getlen
+scrn1:    lda       (tmpadr2), y
+          and       #$0F                ; even: take the low nibble
+          rts
+
+prhex:    phx
+          pha
+          and       #$F0
+          lsr
+          lsr
+          lsr
+          lsr
+          tax
+          lda       hextab, x
+          ora       #$80
+          jsr       putch
+          pla
+          pha
+prhexit:  and       #$0F
+          tax
+          lda       hextab, x
+          ora       #$80
+          jsr       putch
+          pla
+          plx
+          rts
+
+regdmp2:  lda       #'-'+128
+          jsr       putch
+          jsr       blank
+          lda       #'A'+128
+          jsr       putch
+          lda       sava
+          jsr       prhex
+          lda       #'X'+128
+          jsr       putch
+          lda       savx
+          jsr       prhex
+          lda       #'Y'+128
+          jsr       putch
+          lda       savy
+          jsr       prhex
+          lda       #'S'+128
+          jsr       putch
+          lda       savs
+          jsr       prhex
+          lda       #'P'+128
+          jsr       putch
+          lda       savp
+          jsr       prhex
+          jmp       docrlf
+
+mkgad:    lda       ttytab, x ; base memory address
+          sta       tmpadr2
+          lda       ttytab+1, x
+          sta       tmpadr2+1
+          rts
+          
+          nop
+
+ttytab:   .word     $0400, $0480, $0500, $0580, $0600, $0680, $0700, $0780
+          .word     $0428, $04A8, $0528, $05A8, $0628, $06A8, $0728, $07A8
+          .word     $0450, $04D0, $0550, $05D0, $0650, $06D0, $0750, $07D0
+
+          .res      $F93C-*
+prtip:    ldx       savip
+          ldy       savip+1
+prtyx:    tya
+prtax:    jsr       prhex
+prtx:     txa
+          jmp       prhex
+          
+; F948 - TAB (print 3 spaces)
+blank:    ldx       #3
+
+; F94A - HTAB (print X spaces)
+spc:      lda       #' '+128
+@1:       jsr       putch
+          dex
+          bne       @1
+          rts
+
+hextab:   .byte     "0123456789ABCDEF"
+
+crlf:     stz       $24       ; zero column
+lf:       ldy       $25       ; row
+          iny                 ; next
+          cpy       $23       ; outside window?
+          bcs       @1        ; yes, skip
+          sty       $25       ; save position
+          tya
+          jmp       vtab3     ; recompute link
+@1:       jmp       scroll
+
+csrhom:   lda       $22
+          jsr       vtab
+          lda       #$00
+          sta       $24
+          rts
+
+esc:      ldy       $24
+          lda       (linbase), y
+          tax
+          lda       #'^'+128
+          sta       (linbase), y
+          jsr       getch
+          pha
+          txa
+          sta       (linbase), y
+          pla
+          cmp       #'I'+128
+          beq       escup
+          cmp       #'J'+128
+          beq       esclt
+          cmp       #'K'+128
+          beq       escrt
+          cmp       #'M'+128
+          beq       escdn
+          cmp       #'E'+128
+          beq       esccl
+          cmp       #'F'+128
+          beq       esccp
+escrts:   rts
+esccp:    jmp       clreop
+esccl:    jmp       clreol
+escup:    jsr       up
+          bra       esc
+esclt:    jsr       bs
+          bra       esc
+escrt:    jsr       right
+          bra       esc
+escdn:    jsr       lf
+          bra       esc
+
+tabbas:   .word     table0, table1, table2, table1
+          .word     table3, table4, table0, table1
+          .word     table5, table1, table6, table1
+          .word     table5, table4, table5, table4
+table0:   .byte     $01, $00, $11, $10, $01, $00, $22, $20
+table1:   .byte     $11, $10, $11, $10, $02, $00, $22, $20
+table2:   .byte     $21, $00, $11, $10, $01, $00, $22, $20
+table3:   .byte     $01, $00, $01, $10, $01, $00, $22, $20
+table4:   .byte     $11, $10, $01, $10, $02, $00, $02, $20
+table5:   .byte     $11, $00, $11, $10, $01, $00, $22, $20
+table6:   .byte     $11, $10, $11, $10, $01, $00, $22, $20
+
+          .res      $FA40-*
+irq:      sta       sava
+          pla
+          pha
+          asl
+          asl
+          asl
+          bmi       guru
+          jmp       ($03FE)
+guru:     plp
+          jsr       savreg1
+          pla
+          sta       savip
+          pla
+          sta       savip+1
+          nop                 ; on a real ][+ these vector indirectly
+          nop
+          nop
+crash:    jsr       prtip
+          jsr       regdmp2
+          jmp       guru1     ; xxx: should dive into a monitor
+
+; FA62 - reset vector
+          .res      $FA62-*
+reset:    jsr       normal
+          jsr       inittyi
+          jsr       inittyo
+          jsr       initcon
+          cld
+          jsr       nbell
+          lda       $03F3
+          eor       #$A5
+          cmp       $03F4
+          bne       reboot
+          jmp       ($03F2)
+
+; FAA6 - REBOOT
+          .res      $FAA6-*
+reboot:   jsr       banner
+          lda       #<$E000
+          sta       $03F2
+          lda       #>$E000
+          sta       $03F3
+          eor       #$A5
+          sta       $03F4
+          nop
+          nop
+ckslot:   lda       #$C8
+          sta       $01
+          stz       $00
+@1:       dec       $01
+          lda       $01
+          cmp       #$C0
+          beq       ckslot1
+          ldy       #$05 ; ][+ rom checks from 7
+@2:       lda       ($00), y
+          cmp       bootck, y
+          bne       @1
+          dey
+          dey
+          bpl       @2
+          bmi       jzro
+regdmp1:  jmp       regdmp2
+ckslot1:  lda       #'B'
+          sta       $0400
+          jmp       $E000
+jzro:     jmp       ($0000)
+
+reinc:    bit       $C054
+          bit       $C051
+          lda       #0
+          sta       $20
+          sta       $22
+          sta       $24 
+          lda       #40
+          sta       $21
+          lda       #24
+          sta       $23
+          dec
+          sta       $25
+          jmp       mkadr
+
+          .res      $FB01-*
+bootck:   .byte     $45, $20, $FF, $00, $FF, $03, $FF, $3C
+;         .byte     "Apple ][DB", $FF, "C"
+          .byte     $B0, $A2, $20, $4A, $FF, $38, $B0, $9E ; modified in .04
+          .byte     "ap2pcomp"
+
+regs:     .byte     $C1, $D8, $D9, $D0, $D3 ; documented that these bytes should be here
+
+; FB1E - PDL
+; from SimSystem IIe
+pdl:      lda       $C070 ; modified in .04 to fool hw checking
+          ldy       #$00
+@1:       iny
+          beq       @2
+          lda       $C064, x
+          bmi       @1
+@2:       dey
+          rts
+
+; FB2F - INITCON
+          nop
+          nop
+initcon:  bit       $C053
+          bit       $C056
+          nop
+          nop
+          nop
+          nop
+
+; FB39 - TEXT
+text:     bra       reinc
+
+; FB40 - GR
+; FB4B - alternate entry point to GR ("@1" here)
+          nop
+          nop
+          nop
+          nop
+          nop
+gr:       lda       $25
+          cmp       #20
+          bcs       @1
+          lda       #23
+          sta       $25
+          nop
+@1:       jsr       text
+          bit       $C050
+          stz       plotcol
+          lda       #20
+          sta       $22
+          jmp       gclrscr
+
+; FB5B - VTAB
+          nop
+vtab:     sta       $25
+          jmp       vtab2
+
+; FB60 - BANNER
+banner:   jsr       clrscr
+          ldy       #msglen
+@1:       lda       msgtop-1, y
+          sta       1063-msglen, y
+          dey
+          bne       @1
+          rts
+mkrest:   bra       mkrest1
+msgtop:   aschi     "OpenA2 15-DEC-25"
+msglen     =        *-msgtop
+
+; This call is used by Cubit
+cubitfnc: jmp       lputctty
+clreop:   phx
+          jsr       clreol
+          lda       $25
+          pha
+          lda       $24
+          pha
+@1:       inc       $25
+          lda       $25
+          cmp       $23
+          bcs       @2
+          jsr       vtab2
+          ldy       #$00
+          jsr       clreol2
+          bra       @1
+@2:       pla
+          sta       $24
+          pla
+          sta       $25
+          plx
+          jmp       vtab2
+
+          .res      $FBB3-*
+          .byte     $38       ; fool software into thinking we're a ][
+                              ; (this actually works for ProDOS-8)
+          .byte     $00, $00
+
+mkrest1:  lda       $03F3
+          eor       #$A5
+          sta       $03F4
+          rts
+
+          .byte     $2F, $60  ; more deception bytes (which GameDOS looks for)
+
+mkadr:    sta       $25
+          and       #$18      ; ---4 3---
+          sta       linbase   ; .... .... ---4 3---
+          asl                 ;           --43 ----
+          asl                 ;           -43- ----
+          ora       linbase   ; .... .... -434 3---
+          sta       linbase
+          lda       $25
+          and       #$06      ; ---- -21-
+          lsr                 ; ---- --21
+          ora       #$04      ; ---- !---
+          sta       linbase+1 ; ---- !-21 -434 3---
+          lda       $25
+          and       #$01
+          jmp       mkadr2
+
+nbell:    phy
+          txa
+          ldy       #$00
+@1:       ldx       #$80
+          bit       $C030
+@2:       dex
+          bne       @2
+          iny
+          bne       @1
+          tax
+          ply
+          rts
+          nop
+vwrchr:   jmp       wrchr
+          nop
+right:    ldy       $24
+          jmp       wrchr3
+          
+          .res      $FBFD-*
+evdout:   jmp       lputctty  ; Scott Adams
+mkadr2:   beq       @1
+          lda       linbase
+          ora       #$80
+          sta       linbase
+@1:       lda       linbase
+          rts
+docrlf:   lda       #$8D
+          jmp       putch          
+          
+          .res      $FC10-*
+vbs:      jmp       bs        ; MECC
+          
+          .res      $FC1A-*
+          ; ABCDEF01
+up:       lda       $25
+          dec
+          bpl       vtab3
+          inc
+          rts
+          nop
+          
+vtab2:    lda       $25       ; black code relied-on by some games
+vtab3:    jsr       mkadr
+          adc       $20
+          sta       linbase
+          rts
+          nop
+monlf1:   jmp       lf
+scroll:   ldy       $22
+scroll2:  tya
+          pha
+          asl
+          tax
+          lda       ttytab, x
+          sta       tmpadr2
+          lda       ttytab+1, x
+          sta       tmpadr2+1
+          bra       scrskip
+vclreop:  jmp       clreop          
+scrskip:  lda       ttytab+2, x
+          sta       tmpadr2+2
+          lda       ttytab+3, x
+          sta       tmpadr2+3
+          ldx       $21
+          ldy       $20
+          jmp       scroll3
+          nop
+          nop
+
+; FC58 - CLRSCR          
+clrscr:   jsr       csrhom
+          ldy       $22
+clrscr1:  tya
+          asl
+          tax
+          bra       csskip
+moncr:    jmp       crlf
+          nop
+monlf:    bra       monlf1
+csskip:   lda       ttytab, x
+          sta       tmpadr2
+          lda       ttytab+1, x
+          sta       tmpadr2+1
+          bra       csskip2
+vscroll:  bra       scroll
+csskip2:  phy
+          ldy       $20
+          lda       #' '+128
+@2:       sta       (tmpadr2), y
+          iny
+          cpy       $21
+          bne       @2
+          ply
+          iny
+          cpy       $23
+          bne       clrscr1
+          rts
+
+scroll3:  lda       (tmpadr2+2), y
+          sta       (tmpadr2), y
+          iny
+          dex
+          beq       @1
+          bpl       scroll3
+@1:       pla
+          tay
+          iny
+          cpy       $23
+          bne       scroll2
+          stz       $24
+
+; FC9C - CLREOL
+clreol:   ldy       $24
+clreol2:  lda       #' '+128
+@1:       sta       (linbase), y
+          iny
+          cpy       $21
+          bcc       @1
+          rts
+          
+; FCA8 - DELAY (SimSystem IIe version)
+delay:    pha
+@1:       dec
+          bne       @1
+          pla
+          dec
+          bne       delay
+          rts
+
+wrchr:    and       $32                 ; mask
+wrchr2:   ldy       $24
+          sta       (linbase), y        ; drop char onto screen
+wrchr3:   iny                           ; next column
+          cpy       $21                 ; outside window?
+          bcs       vcrlf               ; yes, skip
+          sty       $24                 ; save position
+          rts                           ; return
+vcrlf:    jmp       crlf
+
+; FD0C - GETCH
+; FD0F, FD1B - alternate entry points to GETCH (override vectoring?)
+;       FD1B is the genuine entry (getchtty)
+          .res      $FD0C-*
+getch:    .res      $FD18-*, $EA
+          jmp       ($0038)
+getchtty: ldy       $24                 ; x position
+          lda       (linbase), y
+          pha
+          and       #$3F
+          sta       (linbase), y        ; place key
+@1:       lda       $C000
+          bpl       @1
+          pla
+          sta       (linbase), y
+          lda       $C000
+          bit       $C010
+gkwrts:   rts
+
+gkwesc:   jsr       getch
+          cmp       #$9B
+          bne       gkwrts
+          jsr       esc
+          bra       gkwesc
+          
+; FD6A - GETLIN
+
+gljmpovr: cpx       #$FE
+          beq       noroom
+getlin2:  sta       $0200, x
+          inx
+          bra       nextch
+noroom:   jsr       bell
+          bra       nextch
+glcanc:   lda       #'@'+128
+          jsr       putch
+          bra       crlfgl
+gleol:    sta       $0200, x
+          jsr       doeol     ; was docrlf
+          dey 
+          rts
+vesc:     phx
+          jsr       esc
+          plx
+          bra       nextch
+glbs:     dex
+          bpl       nextch
+crlfgl:   jsr       docrlf
+getlin:   lda       $33
+          jsr       putch
+linbeg:   ldx       #$00
+          nop
+          nop
+          nop
+          nop
+nextch:   jsr       getch
+          cmp       #$8D
+          beq       gleol
+          jsr       putch
+          cmp       #$88
+          beq       glbs
+          cmp       #$98
+          beq       glcanc
+          bra       gljmpov1
+          nop
+          nop
+doeol:    jsr       clreol
+
+vdocrlf:  jmp       docrlf
+          nop
+pradr:    jsr       docrlf
+          lda       $3D
+          ldx       $3C
+          jsr       prtax
+          lda       #'-'+128
+          jmp       putch
+gljmpov1: cmp       #$9B
+          beq       vesc
+          bra       gljmpovr
+
+          .res      $FDDA-*
+puthex:   jmp       prhex
+putctty2: jsr       lputctty
+          pla
+          plx
+          ply
+          rts
+pthexit:  jmp       prhexit
+vlcrlf:   jmp       crlf
+vllf:     jmp       lf
+
+; FDED - PUTCH
+putch:    jmp       ($0036)
+
+; FDF0 - overrides vectoring (putchtty)
+putchtty: phy
+          phx
+          pha
+          jmp       putctty2
+coutz:    jmp       wrchr2
+          nop
+lputctty: cmp       #$87      ; bell?
+          beq       dobel
+          cmp       #$8D      ; CR?
+          beq       vlcrlf
+          cmp       #$8A      ; LF?
+          beq       vllf
+          cmp       #$88      ; BS?
+          beq       bs
+          cmp       #$80      ; below CTRL range?
+          bcc       @1        ; yes, display
+          cmp       #$9F      ; above CTRL range?
+          bcs       @1        ; yes, display
+          rts
+@1:       jmp       wrchr
+bs:       dec       $24       ; back one char
+          bpl       @1        ; return if no underflow
+          ldy       $21       ; right margin
+          dey                 ; minus one
+          bra       hop
+@1:       rts
+hop:      phy
+          jsr       up
+          ply
+          sty       $24
+          nop
+          nop
+
+; FE2C - MEMCPY
+dobel:    jmp       nbell
+; we can be idiots and only copy upward
+; was 31 bytes before taking it 65C02 and removing reliance on Y
+memcpy:   lda       (tmpadr)
+          sta       (target)
+          inc       tmpadr
+          bne       @1
+          inc       tmpadr+1
+@1:       inc       target
+          bne       @2
+          inc       target+1
+@2:       lda       tmpadr
+          cmp       tmpadr+2
+          bne       memcpy
+          lda       tmpadr+1
+          cmp       tmpadr+3
+          bne       memcpy
+          rts
+
+; FE61 - DASM
+
+; FE80 - INVERSE
+          .res      $FE80-*          
+inverse:  ldy       #$3F
+          bne       stmode    ; entry point needs to be 2 down, why not 1?
+
+; FE84 - NORMAL
+normal:   ldy       #$FF
+stmode:   sty       $32
+          rts
+          
+inittyi:  lda       #$00
+
+; FE8B - IN# (black code)
+inno:     sta       tmpadr+2
+          ldx       #$38
+          ldy       #<getchtty
+          bra       vecadj
+
+inittyo:  lda       #$00
+
+; FE95 - PR# (black code)
+prno:     sta       tmpadr+2
+          ldx       #$36
+          ldy       #<putchtty
+
+vecadj:   lda       tmpadr+2
+          and       #$0F
+          beq       @1
+          ora       #>$C000
+          ldy       #$00
+          beq       @2
+@1:       lda       #>putchtty
+@2:       sty       $00, x
+          sta       $01, x
+          rts
+
+gclrscr:  ldy       #0
+gclrscr1: tya
+          asl
+          tax
+          lda       ttytab, x
+          sta       tmpadr2
+          lda       ttytab+1, x
+          sta       tmpadr2+1
+          bra       gclrscr2
+vregdmp:  jmp       regdmp1
+gclrscr2: tya
+          tax
+          ldy       #0
+          tya
+@1:       sta       (tmpadr2), y
+          iny
+          cpy       #40
+          bne       @1
+          txa
+          tay
+          iny
+          cpy       #20
+          bne       gclrscr1
+          rts
+
+; FEBF - REGDMP (to FAD7?)
+
+; FF3A - BELL
+
+          .res      $FF2D-*
+sayerr:   lda       #'E'+128
+          jsr       putch
+          lda       #'R'+128
+          jsr       putch
+          jsr       putch
+
+bell:     lda       #$87
+          jmp       putch
+
+; FF3F - LODREG (Black code, but can't be helped)
+lodreg:   lda       savp
+          pha
+          lda       sava
+lodreg1:  ldx       savx
+          ldy       savy
+          plp
+          rts
+
+; FF4A - SAVREG (Black code, but can't be helped)
+; FF58 - RTS used by drive controller
+
+savreg:   sta       sava
+savreg1:  stx       savx
+          sty       savy
+          php                 ; transfer P reg to A where it can be
+          pla                 ; saved at a memory location
+          sta       savp
+          tsx
+          stx       savs
+          cld
+drvrts:   rts
+          
+guru1:    jsr       inittyi
+          jsr       inittyo
+          jsr       initcon
+          ldy       #$00
+guru2:    lda       msgguru, y
+          beq       @1
+          ora       #$80
+          sta       $07D0, y
+          iny
+          bne       guru2
+@1:       beq       @1
+
+msgguru:  .byte     "GURU MEDITATION", 0
+
+getlen:   pha
+          clc
+          and       #$F0
+          lsr
+          lsr
+          lsr
+          lsr
+          asl
+          tax
+          lda       tabbas, x
+          sta       $2C
+          lda       tabbas+1, x
+          sta       $2D
+          pla
+          and       #$0F
+          pha
+          lsr
+          tay
+          lda       ($2C), y
+          sta       $2F
+          pla
+          and       #$01
+          bne       @1
+          lda       $2F
+          and       #$F0
+          clc
+          lsr
+          lsr
+          lsr
+          lsr
+          bra       @2
+@1:       lda       $2F
+          and       #$0F
+@2:       sta       $2F
+          ldy       #$00
+          rts
+
+; FF69 - MON
+; FF70 - MONEXEC
+
+          .res      $FFC7-*
+zmode:    ldy       #$00      ; this is documented behavior
+          sty       $31
+          rts
+
+          .res      $FFFA-*
+vnmi:     .word     $03FB
+vreset:   .word     reset
+virq:     .word     irq
